@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Radius5 Map</title>
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; }
+  #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  mapboxgl.accessToken = 'pk.eyJ1Ijoic2lrYWZhbmthOTEiLCJhIjoiY21nczN5anlwMWh6bjJrcXdjYW02MjV0eiJ9.XT3r4HFDoQDKdl_IPqm6gA';
+
+  const centerAlmaty = [76.8897, 43.2389];
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/sikafanka91/cmgs3sw6a001l01r70vif0yx9',
+    center: centerAlmaty,
+    zoom: 12
+  });
+
+  map.on('load', () => {
+    map.addSource('radius5-circle', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: centerAlmaty
+        }
+      }
+    });
+
+    const radiusInMeters = 5000;
+
+    map.addLayer({
+      id: 'radius5-fill',
+      type: 'circle',
+      source: 'radius5-circle',
+      paint: {
+        'circle-radius': {
+          stops: [[10, radiusInMeters / 1.5], [14, radiusInMeters / 4]],
+          base: 2
+        },
+        'circle-color': '#7C3AED',
+        'circle-opacity': 0.15
+      }
+    });
+
+    map.addLayer({
+      id: 'radius5-outline',
+      type: 'circle',
+      source: 'radius5-circle',
+      paint: {
+        'circle-radius': {
+          stops: [[10, radiusInMeters / 1.5], [14, radiusInMeters / 4]],
+          base: 2
+        },
+        'circle-color': 'transparent',
+        'circle-stroke-color': '#7C3AED',
+        'circle-stroke-width': 2
+      }
+    });
+  });
+</script>
+</body>
+</html>
