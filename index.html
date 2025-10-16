@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
   <title>Radius 5 — Almaty</title>
 
-  <!-- Mapbox GL -->
-  <link href="https://api.mapbox.com/mapbox-gl-js/v2.16.1/mapbox-gl.css" rel="stylesheet"/>
-  <script src="https://api.mapbox.com/mapbox-gl-js/v2.16.1/mapbox-gl.js"></script>
+  <!-- Mapbox GL JS v3 (совместимо с твоим стилем) -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.css" rel="stylesheet"/>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.5.1/mapbox-gl.js"></script>
 
-  <!-- Turf.js (геодезический круг) -->
+  <!-- Turf.js — геодезический круг -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
   <style>
@@ -20,12 +20,13 @@
       border:1px solid rgba(255,255,255,.08);pointer-events:auto;backdrop-filter:blur(6px)}
     .btn{margin-left:10px;padding:9px 14px;border-radius:9999px;font-weight:700;cursor:pointer;
       background:linear-gradient(90deg,#a855f7,#3b82f6);color:#fff;border:0}
-    /* на случай если Mapbox сам подкинет контролы */
+    /* скрыть любые контролы */
     .mapboxgl-ctrl-top-right,.mapboxgl-ctrl-bottom-right,.mapboxgl-ctrl-bottom-left{display:none!important}
   </style>
 </head>
 <body>
   <div id="map"></div>
+
   <div class="ui">
     <div id="banner" class="banner" style="display:none">
       Location is off. Radius shown from city center.
@@ -34,52 +35,55 @@
   </div>
 
   <script>
-    // твои данные
-    const ACCESS_TOKEN='pk.eyJ1Ijoic2lrYWZhbmthOTEiLCJhIjoiY21nczNuYmxrMG1yeTJsczhna2dsZHJ6ZCJ9.Svpm2ZWpAJFdaS54BiInUQ';
-    // надёжнее использовать HTTPS-стиль, а не mapbox:// в WebView
-    const STYLE_URL='https://api.mapbox.com/styles/v1/sikafanka91/cmgs3sw6a001l01r70vif0yx9?access_token='+ACCESS_TOKEN;
+    // твой токен
+    mapboxgl.accessToken = 'pk.eyJ1Ijoic2lrYWZhbmthOTEiLCJhIjoiY21nczNuYmxrMG1yeTJsczhna2dsZHJ6ZCJ9.Svpm2ZWpAJFdaS54BiInUQ';
 
-    const ALMATY=[76.8897,43.2389];
+    // стиль: можно mapbox://... на v3
+    const STYLE = 'mapbox://styles/sikafanka91/cmgs3sw6a001l01r70vif0yx9';
 
-    mapboxgl.accessToken=ACCESS_TOKEN;
-    const map=new mapboxgl.Map({
-      container:'map', style:STYLE_URL, center:ALMATY, zoom:12, attributionControl:false
+    const ALMATY = [76.8897, 43.2389];
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: STYLE,
+      center: ALMATY,
+      zoom: 12,
+      attributionControl: false
     });
 
-    map.on('load',()=>{
+    map.on('load', () => {
       drawRadius(ALMATY);
-      tryGeo(false); // тихая попытка геолокации
+      tryGeo(false);
     });
 
     function drawRadius(center){
-      const circle=turf.circle(center,5,{units:'kilometers',steps:128});
+      const circle = turf.circle(center, 5, { units: 'kilometers', steps: 128 });
       if(!map.getSource('r5')){
-        map.addSource('r5',{type:'geojson',data:circle});
-        map.addLayer({id:'r5-glow',type:'line',source:'r5',
-          paint:{'line-color':'#7C3AED','line-width':18,'line-blur':16,'line-opacity':0.35}});
-        map.addLayer({id:'r5-fill',type:'fill',source:'r5',
-          paint:{'fill-color':'#7C3AED','fill-opacity':0.16}});
-        map.addLayer({id:'r5-stroke',type:'line',source:'r5',
-          paint:{'line-color':'#60A5FA','line-width':3,'line-blur':1.1,'line-opacity':0.95}});
-        map.addSource('r5-center',{type:'geojson',
-          data:{type:'Feature',geometry:{type:'Point',coordinates:center}}});
-        map.addLayer({id:'r5-center-dot',type:'circle',source:'r5-center',
-          paint:{'circle-radius':5,'circle-color':'#38BDF8','circle-stroke-width':2,'circle-stroke-color':'#0B0F16'}});
-      }else{
+        map.addSource('r5', { type:'geojson', data:circle });
+        map.addLayer({ id:'r5-glow', type:'line', source:'r5',
+          paint:{ 'line-color':'#7C3AED','line-width':18,'line-blur':16,'line-opacity':0.35 }});
+        map.addLayer({ id:'r5-fill', type:'fill', source:'r5',
+          paint:{ 'fill-color':'#7C3AED','fill-opacity':0.16 }});
+        map.addLayer({ id:'r5-stroke', type:'line', source:'r5',
+          paint:{ 'line-color':'#60A5FA','line-width':3,'line-blur':1.1,'line-opacity':0.95 }});
+        map.addSource('r5-center', { type:'geojson',
+          data:{ type:'Feature', geometry:{ type:'Point', coordinates:center } }});
+        map.addLayer({ id:'r5-center-dot', type:'circle', source:'r5-center',
+          paint:{ 'circle-radius':5,'circle-color':'#38BDF8','circle-stroke-width':2,'circle-stroke-color':'#0B0F16' }});
+      } else {
         map.getSource('r5').setData(circle);
-        map.getSource('r5-center').setData({type:'Feature',geometry:{type:'Point',coordinates:center}});
+        map.getSource('r5-center').setData({ type:'Feature', geometry:{ type:'Point', coordinates:center }});
       }
-      const bbox=turf.bbox(circle);
-      map.fitBounds(bbox,{padding:40,duration:600});
+      const bbox = turf.bbox(circle);
+      map.fitBounds(bbox, { padding: 40, duration: 600 });
       pulse();
     }
 
-    // лёгкая анимация свечения
     let started=false;
     function pulse(){ if(started) return; started=true;
-      let t0=performance.now();
+      let t0 = performance.now();
       (function anim(){
-        const t=(performance.now()-t0)/1000, p=(Math.sin(t*2.2)+1)/2;
+        const t = (performance.now()-t0)/1000, p = (Math.sin(t*2.2)+1)/2;
         map.setPaintProperty('r5-fill','fill-opacity',0.12+p*0.10);
         map.setPaintProperty('r5-glow','line-width',14+p*8);
         map.setPaintProperty('r5-glow','line-opacity',0.25+p*0.20);
@@ -87,33 +91,32 @@
       })();
     }
 
-    // геолокация
     const banner=document.getElementById('banner');
     const locBtn=document.getElementById('locBtn');
 
     function tryGeo(requireTap){
       if(!('geolocation' in navigator)){ banner.style.display='block'; return; }
-      const onOk=pos=>{
+      const ok = pos => {
         banner.style.display='none';
         const me=[pos.coords.longitude,pos.coords.latitude];
         drawRadius(me);
         if(!map.getSource('me')){
-          map.addSource('me',{type:'geojson',data:{type:'Feature',geometry:{type:'Point',coordinates:me}}});
-          map.addLayer({id:'me-dot',type:'circle',source:'me',
-            paint:{'circle-radius':6,'circle-color':'#22d3ee','circle-stroke-width':2,'circle-stroke-color':'#111827'}});
-        }else{
-          map.getSource('me').setData({type:'Feature',geometry:{type:'Point',coordinates:me}});
+          map.addSource('me',{ type:'geojson', data:{ type:'Feature', geometry:{ type:'Point', coordinates:me } }});
+          map.addLayer({ id:'me-dot', type:'circle', source:'me',
+            paint:{ 'circle-radius':6,'circle-color':'#22d3ee','circle-stroke-width':2,'circle-stroke-color':'#111827' }});
+        } else {
+          map.getSource('me').setData({ type:'Feature', geometry:{ type:'Point', coordinates:me }});
         }
       };
-      const onErr=()=>{ banner.style.display='block'; };
+      const err = () => { banner.style.display='block'; };
       if(requireTap){
-        navigator.geolocation.getCurrentPosition(onOk,onErr,{enableHighAccuracy:true,timeout:8000,maximumAge:0});
+        navigator.geolocation.getCurrentPosition(ok, err, { enableHighAccuracy:true, timeout:8000, maximumAge:0 });
       }else{
-        navigator.geolocation.getCurrentPosition(onOk,()=>banner.style.display='block',
-          {enableHighAccuracy:false,timeout:3000,maximumAge:10000});
+        navigator.geolocation.getCurrentPosition(ok, () => banner.style.display='block',
+          { enableHighAccuracy:false, timeout:3000, maximumAge:10000 });
       }
     }
-    locBtn.addEventListener('click',()=>tryGeo(true));
+    locBtn.addEventListener('click', () => tryGeo(true));
   </script>
 </body>
 </html>
