@@ -1,0 +1,3365 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Radius 5 — MiniApp</title>
+
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Supabase (UMD) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1/dist/umd/supabase.min.js"></script>
+
+<style>
+  /* Reset tap highlights */
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  :root{
+    --bg:#0b0f16; --panel:#0d1422; --txt:#e9efff; --muted:#9fb0d9;
+    --grad1:#7c3aed; --grad2:#22d3ee;
+    --map-tiles:url('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png');
+  }
+  
+  [data-theme="light"] {
+    --bg:#f8fafc; --panel:#ffffff; --txt:#1e293b; --muted:#64748b;
+    --grad1:#7c3aed; --grad2:#22d3ee;
+    --map-tiles:url('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png');
+  }
+
+  html,body,#app{
+    height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    transition:all 0.3s ease;
+    overflow: hidden;
+  }
+  
+  /* Make sure map is visible and occupies full container */
+  #map{
+    height:100%;position:relative;
+    z-index: 0; /* below UI elements */
+  }
+  
+  #ui{position:absolute;inset:0;pointer-events:none;z-index:900}
+  
+  .topbar{
+    position:absolute;left:12px;right:12px;top:8px;display:flex;gap:10px;align-items:center;pointer-events:auto;flex-wrap:wrap;
+    background:linear-gradient(180deg,rgba(13,22,38,.80),rgba(10,18,32,.78));
+    border:1px solid rgba(140,160,255,.12);
+    border-radius:18px;padding:10px 12px;backdrop-filter:blur(6px);
+    /* Prevent background bleed artifacts behind rounded corners on some devices */
+    overflow: hidden;
+    /* ensure topbar doesn't cover map tiles (map canvas below) */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  }
+  
+  [data-theme="light"] .topbar{
+    background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(248,250,252,.93));
+    border:1px solid rgba(99,102,241,.15);
+    box-shadow:0 4px 12px rgba(0,0,0,.08);
+    overflow: hidden;
+  }
+  
+  .chips{
+    display:flex;
+    gap:8px;
+    overflow:auto;
+    scrollbar-width:none;
+    flex:1 1 auto;
+    padding:4px 2px;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .chips::-webkit-scrollbar{display:none}
+  .chip{
+    background:#0e1624;color:var(--muted);padding:8px 16px;border-radius:12px;
+    font-weight:700;white-space:nowrap;cursor:pointer;transition:all 0.2s ease;
+    border: none;
+    outline: none;
+    position:relative;
+    flex-shrink: 0;
+    min-width: max-content;
+    /* Fix: ensure gradient/rounding doesn't show stray vertical artifacts by clipping */
+    overflow:hidden;
+    -webkit-background-clip: padding-box;
+    background-clip: padding-box;
+    /* Force no image repetition artifacts */
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    box-shadow: none;
+  }
+  .chip.active{background:#17243a;color:#fff}
+  [data-theme="light"] .chip{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}
+  [data-theme="light"] .chip.active{
+    /* Fix: use a single smooth gradient + clip and no extra borders to avoid side stripes */
+    background: linear-gradient(90deg,var(--grad1),var(--grad2));
+    background-size: 100% 100%;
+    -webkit-background-clip: padding-box;
+    background-clip: padding-box;
+    color:#fff;border-color:transparent;
+  }
+  
+  .cta{
+    position:absolute;left:20px;right:96px;bottom:24px;height:56px;border-radius:16px;z-index:960;
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));display:flex;align-items:center;justify-content:center;
+    color:white;font-weight:900;letter-spacing:.4px;pointer-events:auto;cursor:pointer;transition:all 0.2s ease;
+    box-shadow:0 4px 16px rgba(124,58,237,.3);
+    border: none;
+    outline: none;
+  }
+  .cta:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(124,58,237,.4)}
+  
+  .settings-btn{
+    position:absolute;right:20px;bottom:24px;width:56px;height:56px;border-radius:16px;z-index:961; pointer-events:auto;
+    background:linear-gradient(135deg, var(--grad2), var(--grad1)); display:grid;place-items:center;cursor:pointer;transition:all 0.2s ease;
+    box-shadow:0 4px 16px rgba(34,211,238,.3);
+    border: none;
+    outline: none;
+  }
+  .settings-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(34,211,238,.4)}
+  .settings-btn svg{ width:24px;height:24px; stroke:#fff; stroke-width:1.8; fill:none }
+  
+  /* Кнопка геолокации справа от топбара */
+  .geolocation-btn{
+    position:absolute;
+    right:20px;
+    top:76px;
+    width:56px;
+    height:56px;
+    border-radius:50%;
+    background:linear-gradient(135deg, var(--grad2), var(--grad1));
+    display:grid;
+    place-items:center;
+    cursor:pointer;
+    transition:all 0.2s ease;
+    box-shadow:0 4px 16px rgba(34,211,238,.3);
+    pointer-events:auto;
+    z-index:910;
+    border: none;
+    outline: none;
+  }
+  .geolocation-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(34,211,238,.4)}
+  .geolocation-btn svg{
+    width:24px;
+    height:24px;
+    stroke:#fff;
+    stroke-width:1.8;
+    fill:none;
+  }
+  
+  /* Кнопка Delete - всегда видима для создателя пульса */
+  .delete-btn-pulse{
+    position:absolute;right:88px;bottom:24px;width:56px;height:56px;border-radius:16px;z-index:961; pointer-events:auto;
+    background:linear-gradient(135deg, #ef4444, #dc2626); display:grid;place-items:center;cursor:pointer;transition:all 0.2s ease;
+    box-shadow:0 4px 16px rgba(239,68,68,.3);
+    border: none;
+    outline: none;
+  }
+  .delete-btn-pulse:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(239,68,68,.4)}
+  .delete-btn-pulse svg{ width:24px;height:24px; stroke:#fff; stroke-width:2; fill:none }
+  
+  .leaflet-control-zoom,.leaflet-control-attribution{display:none!important}
+
+  /* маркеры с цветами по времени */
+  .pulse{width:52px;height:52px;border-radius:50%;position:relative;display:grid;place-items:center}
+  .pulse::after{content:"";position:absolute;inset:-2px;border-radius:50%;box-shadow:0 0 16px currentColor,inset 0 0 8px rgba(255,255,255,.2)}
+  [data-theme="light"] .pulse::after{box-shadow:0 0 16px currentColor,inset 0 0 8px rgba(255,255,255,.4)}
+  
+  /* Цвета по времени: зеленый (0-30мин), оранжевый (30-60мин), красный (60-120мин) */
+  .pulse-green{ --c:#10b981; color: #10b981; }
+  .pulse-orange{ --c:#f97316; color: #f97316; }
+  .pulse-red{ --c:#ef4444; color: #ef4444; }
+  
+  /* Анимации с разной скоростью */
+  .ring{position:absolute;inset:-10px;border-radius:50%;border:2px solid var(--c);opacity:.45}
+  .ring-fast{animation:ring 2s ease-out infinite}
+  .ring-medium{animation:ring 3s ease-out infinite}
+  .ring-slow{animation:ring 4s ease-out infinite}
+  
+  .pulse>span{font-size:26px;filter:drop-shadow(0 2px 2px rgba(0,0,0,.45))}
+  @keyframes ring{0%{transform:scale(.7);opacity:.6}50%{transform:scale(1.6);opacity:.3}100%{transform:scale(1.85);opacity:0}}
+  
+  .leaflet-tooltip.pulse-label{
+    background:rgba(10,14,22,.92);color:#e6ecff;padding:12px 16px;border-radius:16px;border:1px solid rgba(120,160,255,.26);
+    min-width:200px;backdrop-filter:blur(8px);
+  }
+  [data-theme="light"] .leaflet-tooltip.pulse-label{
+    background:rgba(255,255,255,.95);color:#1e293b;border:1px solid rgba(99,102,241,.2);
+    box-shadow:0 8px 25px rgba(0,0,0,.12);
+  }
+  
+  .meDot{width:18px;height:18px;border-radius:50%;background:#10b981;border:3px solid rgba(16,185,129,.9);
+    box-shadow:0 0 12px rgba(16,185,129,.5),0 0 0 8px rgba(16,185,129,.08);animation:me 1.6s ease-out infinite}
+  @keyframes me{0%{transform:scale(.94)}50%{transform:scale(1.04)}100%{transform:scale(.94)}}
+
+  /* модалки */
+  .modal{
+    position:fixed;inset:0;display:none;align-items:flex-end;justify-content:center;
+    background:rgba(0,0,0,.35);z-index:1200;
+  }
+  .modal.open{display:flex}
+  .sheet{
+    width:100%;background:#0f1729;border:1px solid rgba(140,160,255,.14);
+    border-radius:16px 16px 0 0;padding:16px;max-height:90vh;overflow-y:auto;
+  }
+  [data-theme="light"] .sheet{
+    background:#ffffff;border:1px solid rgba(99,102,241,.15);
+    box-shadow:0 -4px 20px rgba(0,0,0,.1);
+  }
+  .row{display:flex;gap:10px;margin:12px 0}
+  .option-field{
+    position:relative;
+    width:100%;
+    padding:14px 48px 14px 16px;
+    border-radius:16px;
+    background:linear-gradient(180deg,rgba(16,23,41,.96),rgba(12,18,30,.92));
+    border:1px solid rgba(140,160,255,.14);
+    box-shadow:0 8px 22px rgba(6,12,24,.45);
+    cursor:pointer;
+    transition:all 0.25s ease;
+  }
+  .option-field:hover{
+    transform:translateY(-1px);
+    box-shadow:0 14px 30px rgba(10,18,32,.55);
+  }
+  .option-field:active{
+    transform:translateY(0);
+  }
+  .option-field .field-label{
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.04em;
+    color:rgba(159,176,217,.85);
+    text-transform:uppercase;
+    margin-bottom:6px;
+  }
+  .option-field .field-value{
+    font-size:16px;
+    font-weight:700;
+    color:var(--txt);
+  }
+  .option-field::after{
+    content:'';
+    position:absolute;
+    width:8px;
+    height:8px;
+    border-right:2px solid rgba(159,176,217,.82);
+    border-bottom:2px solid rgba(159,176,217,.82);
+    top:50%;
+    right:20px;
+    transform:translateY(-50%) rotate(-45deg);
+    transition:border-color .2s ease,opacity .2s ease;
+  }
+  .option-field:hover::after{
+    border-color:rgba(124,58,237,.85);
+  }
+  [data-theme="light"] .option-field{
+    background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(248,250,252,.95));
+    border:1px solid rgba(99,102,241,.15);
+    box-shadow:0 14px 28px rgba(15,23,42,.12);
+  }
+  [data-theme="light"] .option-field .field-label{
+    color:#94a3b8;
+  }
+  [data-theme="light"] .option-field .field-value{
+    color:#1e293b;
+  }
+  [data-theme="light"] .option-field::after{
+    border-color:#94a3b8;
+  }
+  [data-theme="light"] .option-field:hover::after{
+    border-color:rgba(124,58,237,.9);
+  }
+  .input,select,textarea{
+    width:100%;background:#0e1624;border:1px solid rgba(255,255,255,.08);
+    color:#e9efff;border-radius:12px;padding:12px;transition:all 0.2s ease;
+    border: none;
+    outline: none;
+  }
+  [data-theme="light"] .input,[data-theme="light"] select,[data-theme="light"] textarea{
+    background:#f8fafc;border:1px solid #e2e8f0;color:#1e293b;
+  }
+  .input:focus,select:focus,textarea:focus{
+    outline:none;border-color:var(--grad1);
+  }
+  
+  .btn{
+    padding:12px;border-radius:12px;text-align:center;background:#0e1624;
+    border:1px solid rgba(255,255,255,.08);cursor:pointer;transition:all 0.2s ease;
+    border: none;
+    outline: none;
+  }
+  .btn.primary{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));border:0;font-weight:800;
+  }
+  [data-theme="light"] .btn{
+    background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;
+  }
+  .footer{display:flex;gap:10px;margin-top:16px}
+  .hint{color:#9fb0d9;font-size:12px;margin-top:4px}
+  [data-theme="light"] .hint{color:#64748b}
+  .modal.option-modal{z-index:1300}
+  .option-sheet{padding-bottom:24px}
+  .option-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .option-header h3{margin:0}
+  .modal-close{
+    width:34px;
+    height:34px;
+    border-radius:12px;
+    background:#141e33;
+    display:grid;
+    place-items:center;
+    font-weight:700;
+    color:var(--txt);
+    cursor:pointer;
+    border:1px solid rgba(255,255,255,.08);
+    transition:all .2s ease;
+  }
+  .modal-close:hover{
+    transform:translateY(-1px);
+    box-shadow:0 10px 22px rgba(15,22,38,.55);
+  }
+  [data-theme="light"] .modal-close{
+    background:#e2e8f0;
+    color:#334155;
+    border:1px solid #cbd5e1;
+    box-shadow:0 8px 18px rgba(148,163,184,.3);
+  }
+  [data-theme="light"] .modal-close:hover{
+    box-shadow:0 12px 24px rgba(148,163,184,.35);
+  }
+  .option-list{display:flex;flex-direction:column;gap:12px}
+  .option-card{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:16px;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(15,23,41,.92),rgba(11,18,33,.9));
+    border:1px solid rgba(140,160,255,.14);
+    cursor:pointer;
+    transition:all .25s ease;
+  }
+  .option-card:hover{
+    transform:translateY(-1px);
+    box-shadow:0 12px 26px rgba(12,18,32,.55);
+  }
+  [data-theme="light"] .option-card{
+    background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(242,244,248,.95));
+    border:1px solid rgba(148,163,184,.4);
+    box-shadow:0 12px 26px rgba(15,23,42,.12);
+  }
+  [data-theme="light"] .option-card:hover{
+    box-shadow:0 18px 32px rgba(148,163,184,.28);
+  }
+  .option-info{display:flex;align-items:center;gap:14px}
+  .option-icon{
+    width:40px;
+    height:40px;
+    border-radius:12px;
+    background:rgba(124,58,237,.18);
+    display:grid;
+    place-items:center;
+    font-size:22px;
+  }
+  [data-theme="light"] .option-icon{background:rgba(124,58,237,.12)}
+  .option-text{display:flex;flex-direction:column;gap:4px}
+  .option-title{font-size:15px;font-weight:600;color:var(--txt)}
+  [data-theme="light"] .option-title{color:#1e293b}
+  .option-subtitle{font-size:12px;color:#9fb0d9}
+  [data-theme="light"] .option-subtitle{color:#64748b}
+  .option-check{
+    width:28px;
+    height:28px;
+    border-radius:50%;
+    border:2px solid rgba(124,148,255,.35);
+    display:grid;
+    place-items:center;
+    font-size:14px;
+    font-weight:700;
+    color:rgba(124,148,255,.7);
+    opacity:0;
+    transform:scale(.7);
+    transition:all .25s ease;
+  }
+  .option-card.active{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    border-color:transparent;
+    box-shadow:0 18px 30px rgba(124,58,237,.38);
+  }
+  [data-theme="light"] .option-card.active{box-shadow:0 20px 34px rgba(124,58,237,.28)}
+  .option-card.active .option-title{color:#fff}
+  .option-card.active .option-icon{background:rgba(255,255,255,.22)}
+  .option-card.active .option-check{
+    opacity:1;
+    transform:scale(1);
+    color:#fff;
+    border-color:rgba(255,255,255,.45);
+    background:rgba(255,255,255,.16);
+  }
+  
+  /* Location selection */
+  .location-options{display:flex;gap:10px;margin:12px 0}
+  .location-option{
+    flex:1;text-align:center;padding:12px;background:#0e1624;
+    border:1px solid rgba(255,255,255,.08);border-radius:12px;cursor:pointer;
+    transition:all 0.2s ease;
+    border: none;
+    outline: none;
+    position:relative;
+    overflow:hidden;
+    background-repeat:no-repeat;
+    background-size:100% 100%;
+    -webkit-background-clip:padding-box;
+    background-clip:padding-box;
+  }
+  .location-option.active{background:#17243a;border-color:var(--grad1)}
+  [data-theme="light"] .location-option{
+    background:#f8fafc;border:1px solid #e2e8f0;color:#475569;
+  }
+  [data-theme="light"] .location-option.active{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));color:#fff;border-color:transparent;
+  }
+  
+  /* Map for location selection */
+  #locationMap{
+    height:200px;border-radius:12px;margin:12px 0;border:1px solid rgba(255,255,255,.08);
+  }
+  [data-theme="light"] #locationMap{border:1px solid #e2e8f0}
+  
+  /* Address input */
+  .address-input{position:relative}
+  .address-placeholder{
+    position:absolute;top:12px;left:12px;color:#6b7280;
+    pointer-events:none;transition:all 0.2s;
+  }
+  .address-input input:focus + .address-placeholder,
+  .address-input input:not(:placeholder-shown) + .address-placeholder{
+    display:none;
+  }
+  
+  /* Confirm location button */
+  .confirm-location-btn{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    color:white;
+    border:none;
+    padding:12px;
+    border-radius:12px;
+    font-weight:700;
+    cursor:pointer;
+    width:100%;
+    margin-top:12px;
+    transition:all 0.2s ease;
+    outline: none;
+  }
+  .confirm-location-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 4px 12px rgba(124,58,237,0.3);
+  }
+  
+  /* Кнопка Join */
+  .join-btn{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    color:white;
+    border:none;
+    padding:10px 20px;
+    border-radius:12px;
+    font-weight:700;
+    cursor:pointer;
+    margin-top:12px;
+    width:100%;
+    transition:all 0.2s ease;
+    outline: none;
+  }
+  .join-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 4px 12px rgba(124,58,237,0.3);
+  }
+  .join-btn:active{
+    transform:translateY(0);
+  }
+
+  /* Delete pulse button in tooltip */
+  .delete-btn{
+    background:linear-gradient(90deg, #ef4444, #dc2626);
+    color:white;
+    border:none;
+    padding:8px 16px;
+    border-radius:8px;
+    font-weight:600;
+    cursor:pointer;
+    margin-top:8px;
+    width:100%;
+    transition:all 0.2s ease;
+    outline: none;
+    font-size:12px;
+  }
+  .delete-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 4px 12px rgba(239,68,68,0.3);
+  }
+
+  /* Время создания */
+  .pulse-time{
+    color:#9fb0d9;
+    font-size:11px;
+    margin:4px 0 8px 0;
+    display:flex;
+    align-items:center;
+    gap:4px;
+  }
+  [data-theme="light"] .pulse-time{color:#64748b}
+  .pulse-time::before{
+    content:'🕒';
+    font-size:10px;
+  }
+
+  /* Settings styles */
+  .settings-item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:16px 0;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  [data-theme="light"] .settings-item{
+    border-bottom:1px solid #e2e8f0;
+  }
+  .settings-item:last-child{
+    border-bottom:none;
+  }
+  .settings-label{
+    font-weight:600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .settings-description{
+    color:#9fb0d9;
+    font-size:12px;
+    margin-top:4px;
+  }
+  [data-theme="light"] .settings-description{color:#64748b}
+  
+  .toggle{
+    width:44px;
+    height:24px;
+    background:#1e293b;
+    border-radius:12px;
+    position:relative;
+    cursor:pointer;
+    transition:all 0.3s ease;
+    border: none;
+    outline: none;
+  }
+  [data-theme="light"] .toggle{background:#cbd5e1}
+  .toggle.active{
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+  }
+  .toggle::after{
+    content:'';
+    position:absolute;
+    width:20px;
+    height:20px;
+    background:white;
+    border-radius:50%;
+    top:2px;
+    left:2px;
+    transition:all 0.3s ease;
+    box-shadow:0 1px 3px rgba(0,0,0,.2);
+  }
+  .toggle.active::after{
+    left:22px;
+  }
+  
+  .slider{
+    width:100%;
+    margin:16px 0;
+    -webkit-appearance:none;
+    appearance:none;
+    background:#1e293b;
+    border-radius:8px;
+    height:6px;
+    outline: none;
+  }
+  [data-theme="light"] .slider{background:#cbd5e1}
+  .slider::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    background:linear-gradient(90deg,var(--grad1),var(--grad2));
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
+    border: none;
+    outline: none;
+  }
+  .slider-value{
+    text-align:center;
+    color:var(--txt);
+    font-weight:700;
+    margin-top:8px;
+  }
+  .slider-row{display:flex;align-items:center;gap:8px}
+  .slider-row .slider-end{font-size:11px;color:var(--muted);white-space:nowrap}
+
+  /* Location selection overlay - ИСПРАВЛЕННЫЙ СТИЛЬ */
+  .location-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.7);
+    z-index:1300;
+    display:none;
+    flex-direction:column;
+  }
+  .location-overlay.active{
+    display:flex;
+  }
+  .location-header{
+    background:var(--panel);
+    padding:16px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-bottom:1px solid rgba(255,255,255,.1);
+  }
+  [data-theme="light"] .location-header{
+    border-bottom:1px solid #e2e8f0;
+  }
+  .location-map{
+    flex:1;
+    position:relative;
+    min-height: 0; /* Важно для flexbox */
+    width: 100%;
+    height: 100%;
+  }
+  
+  /* Убеждаемся что Leaflet контейнер занимает всю доступную область */
+  .location-map .leaflet-container {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 300px;
+  }
+  .location-marker{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    z-index:1000;
+    font-size:32px;
+    filter:drop-shadow(0 2px 8px rgba(0,0,0,.5));
+  }
+  /* ИСПРАВЛЕННАЯ инструкция - без лишних элементов */
+  .location-instruction{
+    position:absolute;
+    top:20px;
+    left:50%;
+    transform:translateX(-50%);
+    text-align:center;
+    color:white;
+    font-weight:600;
+    z-index:1000;
+    background:rgba(0,0,0,.7);
+    padding:8px 16px;
+    border-radius:12px;
+    backdrop-filter:blur(8px);
+    white-space: nowrap;
+  }
+  [data-theme="light"] .location-instruction{
+    color:#1e293b;
+    background:rgba(255,255,255,.9);
+  }
+
+  /* Help icon */
+  .help-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--muted);
+    color: var(--bg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: help;
+  }
+
+  /* Visibility options */
+  .visibility-options {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(255,255,255,.05);
+    border-radius: 12px;
+    display: none;
+  }
+  [data-theme="light"] .visibility-options {
+    background: rgba(0,0,0,.03);
+  }
+  .visibility-options.active {
+    display: block;
+  }
+  .visibility-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+  }
+  [data-theme="light"] .visibility-option {
+    border-bottom: 1px solid rgba(0,0,0,.1);
+  }
+  .visibility-option:last-child {
+    border-bottom: none;
+  }
+  .visibility-label {
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .visibility-description {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* Language selector */
+  .language-selector {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .language-option {
+    flex: 1;
+    padding: 8px 12px;
+    background: #0e1624;
+    border: none; /* match chip style in dark mode to avoid side lines */
+    border-radius: 8px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700; /* match chip weight */
+    color: var(--muted);
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+    -webkit-background-clip: padding-box;
+    background-clip: padding-box;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    box-shadow: none;
+  }
+  [data-theme="light"] .language-option {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0; /* like chip in light mode */
+    color: #64748b;
+  }
+  .language-option.active {
+    /* Match chip active in dark mode */
+    background:#17243a;
+    color:#fff;
+    border:none;
+  }
+  [data-theme="light"] .language-option.active{
+    /* Match chip active in light mode */
+    background: linear-gradient(90deg,var(--grad1),var(--grad2));
+    background-size:100% 100%;
+    -webkit-background-clip: padding-box;
+    background-clip: padding-box;
+    color:#fff;
+    border-color:transparent;
+  }
+
+  /* Ensure rounded elements render cleanly on some Android WebViews */
+  .chip, .language-option, .location-option {
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+  
+  /* === SPLASH SCREEN === */
+  #splash-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: splashFadeIn 0.6s ease-out;
+    overflow: hidden;
+  }
+  
+  #splash-screen.fade-out {
+    animation: splashFadeOut 0.8s ease-out forwards;
+  }
+  
+  .splash-content {
+    text-align: center;
+    padding: 20px;
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .splash-logo {
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 40px;
+    opacity: 0;
+    animation: logoAppear 0.8s ease-out 0.2s forwards;
+  }
+  
+  .splash-logo svg {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 8px 24px rgba(124, 58, 237, 0.4));
+  }
+  
+  .splash-title {
+    font-size: clamp(48px, 12vw, 96px);
+    font-weight: 900;
+    letter-spacing: -2px;
+    margin: 0 0 20px 0;
+    background: linear-gradient(135deg, var(--grad1), var(--grad2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: titleAppear 0.8s ease-out 0.4s forwards;
+  }
+  
+  .splash-tagline {
+    font-size: clamp(18px, 4vw, 28px);
+    font-weight: 500;
+    color: var(--txt);
+    margin: 0 0 60px 0;
+    letter-spacing: 0.5px;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: taglineAppear 0.8s ease-out 0.6s forwards;
+  }
+  
+  .splash-credits {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 14px;
+    color: var(--muted);
+    opacity: 0;
+    animation: creditsAppear 0.8s ease-out 0.8s forwards;
+    white-space: nowrap;
+  }
+  
+  /* Animations */
+  @keyframes splashFadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes splashFadeOut {
+    to {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+  
+  @keyframes logoAppear {
+    to {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes titleAppear {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes taglineAppear {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes creditsAppear {
+    to {
+      opacity: 1;
+    }
+  }
+  
+  /* Mobile optimization */
+  @media (max-width: 768px) {
+    .splash-logo {
+      width: 100px;
+      height: 100px;
+      margin-bottom: 30px;
+    }
+    
+    .splash-tagline {
+      margin-bottom: 40px;
+    }
+    
+    .splash-credits {
+      bottom: 30px;
+      font-size: 12px;
+    }
+  }
+  
+  @media (max-height: 600px) {
+    .splash-logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+    }
+    
+    .splash-credits {
+      bottom: 20px;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Splash Screen -->
+  <div id="splash-screen">
+    <div class="splash-content">
+      <div class="splash-logo">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer circle -->
+          <circle cx="100" cy="100" r="95" stroke="url(#gradient1)" stroke-width="3" fill="none" opacity="0.6"/>
+          <!-- Middle circle -->
+          <circle cx="100" cy="100" r="65" stroke="url(#gradient2)" stroke-width="3" fill="none" opacity="0.8"/>
+          <!-- Inner circle with radius symbol -->
+          <circle cx="100" cy="100" r="35" stroke="url(#gradient3)" stroke-width="4" fill="none"/>
+          <!-- Radius line -->
+          <line x1="100" y1="100" x2="148" y2="75" stroke="url(#gradient4)" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="148" cy="75" r="6" fill="#22d3ee"/>
+          
+          <!-- Gradients -->
+          <defs>
+            <linearGradient id="gradient1" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
+            </linearGradient>
+            <linearGradient id="gradient2" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#22d3ee;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+            </linearGradient>
+            <linearGradient id="gradient3" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
+            </linearGradient>
+            <linearGradient id="gradient4" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#22d3ee;stop-opacity:1" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1 class="splash-title">RADIUS 5</h1>
+      <p class="splash-tagline">Stop Scrolling / Start Living</p>
+      <div class="splash-credits">created by / justBaha</div>
+    </div>
+  </div>
+  
+  <div id="map"></div>
+
+  <div id="ui">
+    <div class="topbar">
+      <div class="chips" id="chips"></div>
+    </div>
+    
+    <!-- Кнопка геолокации справа от топбара -->
+    <button class="geolocation-btn" id="geolocationBtn" title="Вернуться к моей геолокации">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+        <circle cx="12" cy="10" r="3"></circle>
+      </svg>
+    </button>
+  </div>
+
+  <div class="cta" id="createBtn">+ СОЗДАТЬ ПУЛЬС</div>
+  
+  <!-- Кнопка Delete - всегда видима для создателя пульса -->
+  <button class="delete-btn-pulse" id="deletePulseBtn" title="Удалить пульс" style="display: none;">
+    <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 6h18"></path>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      <line x1="10" y1="11" x2="10" y2="17"></line>
+      <line x1="14" y1="11" x2="14" y2="17"></line>
+    </svg>
+  </button>
+  
+  <div class="settings-btn" id="settingsBtn" title="Настройки">
+    <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+      <g transform="translate(12 12)">
+        <circle r="7.2"></circle><rect x="-1" y="-11.2" width="2" height="3.4" rx="1"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(45)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(90)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(135)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(180)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(225)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(270)"/>
+        <rect x="-1" y="-11.2" width="2" height="3.4" rx="1" transform="rotate(315)"/>
+        <circle r="3.4"></circle>
+      </g>
+    </svg>
+  </div>
+
+  <!-- Location Selection Overlay - ИСПРАВЛЕННЫЙ -->
+  <div class="location-overlay" id="locationOverlay">
+    <div class="location-header">
+      <h3 style="margin:0">Выберите локацию</h3>
+      <div class="btn" id="cancelLocationSelect">Отмена</div>
+    </div>
+    <div class="location-map" id="locationSelectMap">
+      <div class="location-instruction">Нажмите на карту для выбора локации</div>
+    </div>
+    <!-- ИСПРАВЛЕНО: убрана лишняя обертка с белым фоном -->
+    <div style="padding:16px;background:transparent">
+      <button class="confirm-location-btn" id="confirmLocationSelect">✅ Подтвердить локацию</button>
+    </div>
+  </div>
+
+  <!-- Modal create pulse -->
+  <div class="modal" id="createModal">
+    <div class="sheet">
+      <h3>Создать пульс</h3>
+      
+      <div class="row">
+        <div class="option-field" id="categoryField">
+          <div>
+            <div class="field-label" id="categoryFieldLabel">Категория</div>
+            <div class="field-value" id="categoryDisplay">🏃 Спорт</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Выбор количества людей от 1 до 5 -->
+      <div class="row">
+        <div class="option-field" id="peopleField">
+          <div>
+            <div class="field-label" id="peopleFieldLabel">Количество людей</div>
+            <div class="field-value" id="peopleDisplay">5 человек</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="row">
+        <textarea id="msg" rows="3" class="input" placeholder="Напишите ваше сообщение..."></textarea>
+      </div>
+      
+      <div class="row">
+        <div style="width:100%">
+          <div style="margin-bottom:8px; font-weight:600" id="selectLocationLabel">Выберите локацию</div>
+          <div class="location-options">
+            <div class="location-option" id="customLocation">Выбрать на карте</div>
+            <div class="location-option active" id="addressLocation">Указать адрес</div>
+          </div>
+        </div>
+      </div>
+      
+      <div id="addressInputContainer">
+        <div class="address-input">
+          <input type="text" id="addressInput" class="input" placeholder="" style="padding-left:12px">
+          <div class="address-placeholder">введите точный адрес</div>
+        </div>
+      </div>
+      
+      <div id="locationMapContainer" style="display:none">
+        <div class="hint">Выбранная локация будет показана здесь после выбора на карте</div>
+      </div>
+      
+      <div class="footer">
+        <div class="btn" id="cancelCreate">Отмена</div>
+        <div class="btn primary" id="saveCreate">Опубликовать</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal option-modal" id="categoryModal">
+    <div class="sheet option-sheet">
+      <div class="option-header">
+        <h3 id="categoryModalTitle">Выбор категории</h3>
+        <div class="modal-close" id="closeCategoryModal">✕</div>
+      </div>
+      <div class="option-list" id="categoryOptions"></div>
+    </div>
+  </div>
+
+  <div class="modal option-modal" id="peopleModal">
+    <div class="sheet option-sheet">
+      <div class="option-header">
+        <h3 id="peopleModalTitle">Количество людей</h3>
+        <div class="modal-close" id="closePeopleModal">✕</div>
+      </div>
+      <div class="option-list" id="peopleOptions"></div>
+    </div>
+  </div>
+
+  <!-- Modal Settings -->
+  <div class="modal" id="settingsModal">
+    <div class="sheet">
+      <h3>Настройки</h3>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Тёмная тема</div>
+          <div class="settings-description">Использовать тёмную тему для экономии батареи</div>
+        </div>
+        <div class="toggle active" id="darkModeToggle"></div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Показывать мою локацию</div>
+          <div class="settings-description">Отображать вашу локацию на карте</div>
+        </div>
+        <div class="toggle active" id="showLocationToggle"></div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Уведомления о пульсах</div>
+          <div class="settings-description">Получать уведомления о новых пульсах рядом</div>
+        </div>
+        <div class="toggle active" id="notificationsToggle"></div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Радиус поиска</div>
+          <div class="settings-description">Настройте как далеко показывать пульсы</div>
+        </div>
+        <div style="width:220px">
+          <div class="slider-row">
+            <span class="slider-end">0 км</span>
+            <input type="range" min="0" max="10" value="5" class="slider" id="radiusSlider">
+            <span class="slider-end">10 км</span>
+          </div>
+          <div class="slider-value" id="radiusValue">5 км</div>
+        </div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Видимость пульсов</div>
+          <div class="settings-description">Контролируйте кто может видеть ваши пульсы</div>
+        </div>
+        <div class="toggle" id="pulseVisibilityToggle"></div>
+      </div>
+      
+      <div class="visibility-options" id="visibilityOptions">
+        <div class="visibility-option">
+          <div>
+            <div class="visibility-label">Публичный</div>
+            <div class="visibility-description">Видят все в радиусе</div>
+          </div>
+          <div class="toggle active" data-visibility="public"></div>
+        </div>
+        <div class="visibility-option">
+          <div>
+            <div class="visibility-label">Локальный</div>
+            <div class="visibility-description">Только активные рядом за 24ч</div>
+          </div>
+          <div class="toggle" data-visibility="local"></div>
+        </div>
+        <div class="visibility-option">
+          <div>
+            <div class="visibility-label">Приватная ссылка</div>
+            <div class="visibility-description">Только по приглашению</div>
+          </div>
+          <div class="toggle" data-visibility="private"></div>
+        </div>
+      </div>
+      
+      <div class="settings-item" id="languageSetting">
+        <div>
+          <div class="settings-label">Язык интерфейса</div>
+          <div class="settings-description">Выберите язык приложения</div>
+        </div>
+      </div>
+      
+      <div class="language-selector">
+        <div class="language-option active" data-lang="ru">Русский</div>
+        <div class="language-option" data-lang="en">English</div>
+        <div class="language-option" data-lang="kz">Қазақша</div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Авто-обновление карты</div>
+          <div class="settings-description">Обновлять пульсы автоматически</div>
+        </div>
+        <div class="toggle" id="autoRefreshToggle"></div>
+      </div>
+      
+      <div class="settings-item">
+        <div>
+          <div class="settings-label">Вибрация</div>
+          <div class="settings-description">Тактильная обратная связь</div>
+        </div>
+        <div class="toggle active" id="vibrationToggle"></div>
+      </div>
+      
+      <div class="footer">
+        <div class="btn" id="cancelSettings">Закрыть</div>
+        <div class="btn primary" id="saveSettings">Сохранить</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* -------------------- CONFIG -------------------- */
+/* NOTE: Supabase keys are present in the prototype. For production move them to secure env or server. */
+const SUPABASE_URL = "https://gubjmpukjzdlmnzdyluy.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1YmptcHVranpkbG1uemR5bHV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxNTQzMTIsImV4cCI6MjA3NzczMDMxMn0.jWVJGaTi7t24KLn3agw5HBSzFfjb0lU6GnFXREH9PfA";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Принудительно обновляем кеш схемы
+setTimeout(async () => {
+  try {
+    const { data, error } = await db.from('pulses').select('people_count').limit(1);
+    console.log('Schema cache refreshed');
+  } catch (e) {
+    console.log('Cache refresh attempt');
+  }
+}, 1000);
+
+/* -------------------- LANGUAGE MANAGEMENT -------------------- */
+const translations = {
+  ru: {
+    createPulse: "СОЗДАТЬ ПУЛЬС",
+    createPulseTitle: "Создать пульс",
+    categoryLabel: "Категория",
+    categorySelectTitle: "Выберите категорию",
+    peopleLabel: "Количество людей",
+    peopleSelectTitle: "Выберите количество людей",
+    sport: "Спорт",
+    games: "Игры", 
+    art: "Искусство",
+    social: "Социальное",
+    creative: "Креатив",
+    chill: "Отдых",
+    active: "Активность",
+    dating: "Знакомства",
+    education: "Образование",
+    animal: "Животные",
+    help: "Помощь",
+    selectLocation: "Выберите локацию",
+    chooseOnMap: "Выбрать на карте",
+    writeAddress: "Указать адрес",
+    enterAddress: "введите точный адрес",
+    cancel: "Отмена",
+    publish: "Опубликовать",
+    settings: "Настройки",
+    darkMode: "Тёмная тема",
+    showLocation: "Показывать мою локацию",
+    notifications: "Уведомления о пульсах",
+    searchRadius: "Радиус поиска",
+    autoRefresh: "Авто-обновление карты",
+    vibration: "Вибрация",
+    close: "Закрыть",
+    save: "Сохранить",
+    join: "Присоединиться",
+    delete: "Удалить",
+    selectLocationTitle: "Выберите локацию",
+    tapToSelect: "Нажмите на карту для выбора локации",
+    confirmLocation: "Подтвердить локацию",
+    yourPulse: "Ваш пульс",
+    deleteConfirm: "Удалить этот пульс?",
+    pulseVisibility: "Видимость пульсов",
+    language: "Язык интерфейса",
+    deletePulse: "Удалить пульс",
+    all: "Все",
+    peopleCount: "человек",
+    peopleCount2: "человека",
+    locationHint: "Выбранная локация будет показана здесь после выбора на карте",
+    writeMessage: "Напишите ваше сообщение...",
+    justNow: "только что",
+    minutesAgo: "м назад",
+    hoursAgo: "ч назад",
+    daysAgo: "д назад",
+    myGeolocation: "МОЯ ГЕОЛОКАЦИЯ",
+    returnToLocation: "Вернуться к моей геолокации",
+    selectLocationLabel: "Выберите локацию",
+    public: "Публичный",
+    local: "Локальный",
+    private: "Приватная ссылка",
+    publicDesc: "Видят все в радиусе",
+    localDesc: "Только активные рядом за 24ч",
+    privateDesc: "Только по приглашению",
+    distanceUnit: "км",
+    deleteError: "Ошибка при удалении",
+    createError: "Ошибка создания пульса",
+    errorUnknown: "неизвестно",
+    errorGeneric: "ошибка",
+    joinPreview: "🎉 {join}!\\n\\n\"{message}\"\\n\\nВ реальном приложении это открыло бы чат с создателем!"
+  },
+  en: {
+    createPulse: "CREATE PULSE",
+    createPulseTitle: "Create Pulse",
+    categoryLabel: "Category",
+    categorySelectTitle: "Choose Category",
+    peopleLabel: "Number of people",
+    peopleSelectTitle: "Choose number of people",
+    sport: "Sport",
+    games: "Games",
+    art: "Art",
+    social: "Social", 
+    creative: "Creative",
+    chill: "Chill",
+    active: "Active",
+    dating: "Dating",
+    education: "Education",
+    animal: "Animal",
+    help: "Help",
+    selectLocation: "Select location",
+    chooseOnMap: "Choose on Map",
+    writeAddress: "Write Address",
+    enterAddress: "write correct address",
+    cancel: "Cancel",
+    publish: "Publish",
+    settings: "Settings",
+    darkMode: "Dark Mode",
+    showLocation: "Show My Location",
+    notifications: "Pulse Notifications",
+    searchRadius: "Search Radius",
+    autoRefresh: "Auto-refresh Map",
+    vibration: "Vibration",
+    close: "Close",
+    save: "Save",
+    join: "Join",
+    delete: "Delete",
+    selectLocationTitle: "Select Location",
+    tapToSelect: "Tap on the map to select location",
+    confirmLocation: "Confirm This Location",
+    yourPulse: "Your pulse",
+    deleteConfirm: "Delete this pulse?",
+    pulseVisibility: "Pulse Visibility",
+    language: "Interface Language",
+    deletePulse: "Delete Pulse",
+    all: "All",
+    peopleCount: "person",
+    peopleCount2: "people",
+    locationHint: "Selected location will be shown here after choosing on the map",
+    writeMessage: "Write your message...",
+    justNow: "just now",
+    minutesAgo: "m ago",
+    hoursAgo: "h ago",
+    daysAgo: "d ago",
+    myGeolocation: "MY LOCATION",
+    returnToLocation: "Return to my geolocation",
+    selectLocationLabel: "Select location",
+    public: "Public",
+    local: "Local",
+    private: "Private link",
+    publicDesc: "Visible to everyone nearby",
+    localDesc: "Only active people nearby in the last 24h",
+    privateDesc: "Invite only",
+    distanceUnit: "km",
+    deleteError: "Error deleting pulse",
+    createError: "Error creating pulse",
+    errorUnknown: "unknown",
+    errorGeneric: "error",
+    joinPreview: "🎉 {join}!\\n\\n\"{message}\"\\n\\nIn the real app this would open a chat with the creator!"
+  },
+  kz: {
+    createPulse: "ПУЛЬСТЫ ЖАРИЯЛАУ",
+    createPulseTitle: "Пульс жасау",
+    categoryLabel: "Санат",
+    categorySelectTitle: "Санатты таңдаңыз",
+    peopleLabel: "Адам саны",
+    peopleSelectTitle: "Адам санын таңдаңыз",
+    sport: "Спорт",
+    games: "Ойындар",
+    art: "Өнер",
+    social: "Әлеуметтік",
+    creative: "Шығармашылық",
+    chill: "Демалу",
+    active: "Белсенділік",
+    dating: "Танысу",
+    education: "Білім",
+    animal: "Жануарлар",
+    help: "Көмек",
+    selectLocation: "Орналасуды таңдаңыз",
+    chooseOnMap: "Картадан таңдау",
+    writeAddress: "Мекенжайды көрсету",
+    enterAddress: "дәл мекенжайды енгізіңіз",
+    cancel: "Болдырмау",
+    publish: "Жариялау",
+    settings: "Параметрлер",
+    darkMode: "Қараңғы режим",
+    showLocation: "Менің орналасуымды көрсету",
+    notifications: "Пульс туралы хабарландырулар",
+    searchRadius: "Іздеу радиусы",
+    autoRefresh: "Картаны авто-жаңарту",
+    vibration: "Діріл",
+    close: "Жабу",
+    save: "Сақтау",
+    join: "Қосылу",
+    delete: "Жою",
+    selectLocationTitle: "Орналасуды таңдаңыз",
+    tapToSelect: "Орналасуды таңдау үшін картаны басыңыз",
+    confirmLocation: "Орналасуды растау",
+    yourPulse: "Сіздің пульсіңіз",
+    deleteConfirm: "Бұл пульсті жою керек пе?",
+    pulseVisibility: "Пульстердің көрінуі",
+    language: "Интерфейс тілі",
+    deletePulse: "Пульсті жою",
+    all: "Барлығы",
+    peopleCount: "адам",
+    peopleCount2: "адам",
+    locationHint: "Таңдалған орналасу картадан таңдағаннан кейін осы жерде көрсетіледі",
+    writeMessage: "Хабарламаңызды жазыңыз...",
+    justNow: "дәл қазір",
+    minutesAgo: "м бұрын",
+    hoursAgo: "сағ бұрын",
+    daysAgo: "күн бұрын",
+    myGeolocation: "МЕНІҢ ОРНАЛАСУЫМ",
+    returnToLocation: "Менің орналасуыма оралу",
+    selectLocationLabel: "Орналасуды таңдаңыз",
+    public: "Жалпыға ашық",
+    local: "Жергілікті",
+    private: "Жеке сілтеме",
+    publicDesc: "Радиустағы барлық адамдар көреді",
+    localDesc: "Соңғы 24 сағаттағы жақын белсенділер ғана",
+    privateDesc: "Тек шақыру арқылы",
+    distanceUnit: "км",
+    deleteError: "Пульсті жою қатесі",
+    createError: "Пульсті жасау қатесі",
+    errorUnknown: "белгісіз",
+    errorGeneric: "қате",
+    joinPreview: "🎉 {join}!\\n\\n\"{message}\"\\n\\nНағыз қосымшада бұл ұйымдастырушыға чат ашар еді!"
+  }
+};
+
+// Категорийные подсказки для всех языков
+  const categoryHints = {
+  ru: {
+    'sport': 'Баскетбол в парке, кто со мной?',
+    'games': 'Турнир по Mario Kart у меня дома!',
+    'art': 'Сессия скетчинга в парке',
+    'social': 'Кофе и общение в Starbucks',
+    'creative': 'Брейншторминг новых идей для проекта',
+    'chill': 'Наблюдение за закатом на пляже',
+    'active': 'Утренняя пробежка вокруг озера',
+    'dating': 'Напитки и разговор?',
+    'education': 'Группа по изучению к экзамену по математике',
+    'animal': 'Свидание с собаками в собачьем парке',
+    'help': 'Нужна помощь с перемещением мебели'
+  },
+  en: {
+    'sport': 'Basketball in the park, who is with me?',
+    'games': 'Mario Kart tournament at my place!',
+    'art': 'Sketching session in the park',
+    'social': 'Coffee and chat at Starbucks',
+    'creative': 'Brainstorming new ideas for the project',
+    'chill': 'Watching the sunset on the beach',
+    'active': 'Morning run around the lake',
+    'dating': 'Drinks and conversation?',
+    'education': 'Study group for math exam',
+    'animal': 'Doggy date at the dog park',
+    'help': 'Need help moving furniture'
+  },
+  kz: {
+    'sport': 'Паркте баскетбол, кім менімен бірге?',
+    'games': 'Менің үйімде Mario Kart турнирі!',
+    'art': 'Паркте эскиз салу сессиясы',
+    'social': 'Starbucks-та кофе және әңгіме',
+    'creative': 'Жоба үшін жаңа идеяларды брейншторминг',
+    'chill': 'Пляжда күн батуды бақылау',
+    'active': 'Таңертең көл айналасында жүгіру',
+    'dating': 'Сусындар және әңгіме?',
+    'education': 'Математика емтиханына арналған оқу тобы',
+    'animal': 'Ит паркінде иттермен кездесу',
+    'help': 'Жиһазды жылжытуға көмек керек'
+  }
+};
+
+// Настройки описания для всех языков
+const settingsDescriptions = {
+  ru: {
+    darkMode: 'Использовать тёмную тему для экономии батареи',
+    showLocation: 'Отображать вашу локацию на карте',
+    notifications: 'Получать уведомления о новых пульсах рядом',
+    searchRadius: 'Настройте как далеко показывать пульсы',
+    autoRefresh: 'Обновлять пульсы автоматически',
+    vibration: 'Тактильная обратная связь',
+    pulseVisibility: 'Контролируйте кто может видеть ваши пульсы',
+    language: 'Выберите язык приложения'
+  },
+  en: {
+    darkMode: 'Use dark theme to save battery',
+    showLocation: 'Show your location on the map',
+    notifications: 'Receive notifications about new pulses nearby',
+    searchRadius: 'Set how far to show pulses',
+    autoRefresh: 'Automatically refresh pulses',
+    vibration: 'Tactile feedback',
+    pulseVisibility: 'Control who can see your pulses',
+    language: 'Choose app language'
+  },
+  kz: {
+    darkMode: 'Батареяны үнемдеу үшін қараңғы режимді пайдалану',
+    showLocation: 'Картада сіздің орналасуыңызды көрсету',
+    notifications: 'Жақын жердегі жаңа пульстер туралы хабарландырулар алу',
+    searchRadius: 'Пульстерді қаншалықты алысқа дейін көрсетуін орнатыңыз',
+    autoRefresh: 'Пульстерді автоматты түрде жаңарту',
+    vibration: 'Тактильді кері байланыс',
+    pulseVisibility: 'Сіздің пульстеріңізді кім көре алатынын басқару',
+    language: 'Қолданба тілін таңдаңыз'
+  }
+};
+
+let currentLanguage = 'ru';
+
+function formatPeopleCount(count, lang) {
+  const t = translations[lang];
+  if (!t) return String(count);
+  if (lang === 'ru') {
+    if (count === 1) return `${count} ${t.peopleCount}`;
+    if (count >= 2 && count <= 4) return `${count} ${t.peopleCount2}`;
+    return `${count} ${t.peopleCount}`;
+  }
+  return `${count} ${count === 1 ? t.peopleCount : t.peopleCount2}`;
+}
+
+function applyLanguage(lang) {
+  currentLanguage = lang;
+  const t = translations[lang];
+  const desc = settingsDescriptions[lang];
+  const hints = categoryHints[lang];
+  
+  // Update UI elements
+  const setTextById = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = value;
+    }
+  };
+  const setTitleById = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.title = value;
+    }
+  };
+  const setTextBySelector = (selector, value) => {
+    const el = document.querySelector(selector);
+    if (el) {
+      el.textContent = value;
+    }
+  };
+  const updateSettingEntry = (element, labelValue, descriptionValue) => {
+    if (!element) return;
+    let container = element.parentElement;
+    while (container && !container.classList.contains('settings-item')) {
+      container = container.parentElement;
+    }
+    if (!container) return;
+    const labelEl = container.querySelector('.settings-label');
+    if (labelEl) {
+      labelEl.textContent = labelValue;
+    }
+    const descriptionEl = container.querySelector('.settings-description');
+    if (descriptionEl) {
+      descriptionEl.textContent = descriptionValue;
+    }
+  };
+
+  setTextById('createBtn', t.createPulse);
+  setTextBySelector('#createModal h3', t.createPulseTitle);
+  setTextBySelector('#settingsModal h3', t.settings);
+  setTextBySelector('#locationOverlay h3', t.selectLocationTitle);
+  setTextBySelector('.location-instruction', t.tapToSelect);
+  const confirmLocationEl = document.getElementById('confirmLocationSelect');
+  if (confirmLocationEl) {
+    confirmLocationEl.textContent = '✅ ' + t.confirmLocation;
+  }
+  setTitleById('deletePulseBtn', t.deletePulse);
+  setTitleById('geolocationBtn', t.returnToLocation);
+  const settingsBtnEl = document.getElementById('settingsBtn');
+  if (settingsBtnEl) {
+    settingsBtnEl.title = t.settings;
+  }
+  
+  // Update buttons
+  setTextById('cancelCreate', t.cancel);
+  setTextById('saveCreate', t.publish);
+  setTextById('cancelLocationSelect', t.cancel);
+  setTextById('cancelSettings', t.close);
+  setTextById('saveSettings', t.save);
+
+  if (categoryFieldLabel) categoryFieldLabel.textContent = t.categoryLabel;
+  if (peopleFieldLabel) peopleFieldLabel.textContent = t.peopleLabel;
+  if (categoryModalTitle) categoryModalTitle.textContent = t.categorySelectTitle;
+  if (peopleModalTitle) peopleModalTitle.textContent = t.peopleSelectTitle;
+  if (closeCategoryModalBtn) closeCategoryModalBtn.setAttribute('title', t.close);
+  if (closePeopleModalBtn) closePeopleModalBtn.setAttribute('title', t.close);
+
+  renderCategoryOptions();
+  renderPeopleOptions();
+  updateCategoryDisplay();
+  updatePeopleDisplay();
+  
+  // Update location options (no emojis)
+  const selectLocationLabelEl = document.getElementById('selectLocationLabel');
+  if (selectLocationLabelEl) {
+    selectLocationLabelEl.textContent = t.selectLocationLabel;
+  }
+  const customLocationEl = document.getElementById('customLocation');
+  if (customLocationEl) {
+    customLocationEl.textContent = t.chooseOnMap;
+  }
+  const addressLocationEl = document.getElementById('addressLocation');
+  if (addressLocationEl) {
+    addressLocationEl.textContent = t.writeAddress;
+  }
+  const addressPlaceholderEl = document.querySelector('.address-placeholder');
+  if (addressPlaceholderEl) {
+    addressPlaceholderEl.textContent = t.enterAddress;
+  }
+  const hintEl = document.querySelector('#locationMapContainer .hint');
+  if (hintEl) {
+    hintEl.textContent = t.locationHint;
+  }
+  
+  // Update textarea placeholder with category-specific hint
+  updateMessagePlaceholder();
+  
+  // Update settings labels and descriptions
+  updateSettingEntry(document.getElementById('darkModeToggle'), t.darkMode, desc.darkMode);
+  updateSettingEntry(document.getElementById('showLocationToggle'), t.showLocation, desc.showLocation);
+  updateSettingEntry(document.getElementById('notificationsToggle'), t.notifications, desc.notifications);
+  const radiusSliderEl = document.getElementById('radiusSlider');
+  updateSettingEntry(radiusSliderEl, t.searchRadius, desc.searchRadius);
+
+  updateRadiusLabels();
+  
+  updateSettingEntry(document.getElementById('autoRefreshToggle'), t.autoRefresh, desc.autoRefresh);
+  updateSettingEntry(document.getElementById('vibrationToggle'), t.vibration, desc.vibration);
+  updateSettingEntry(document.getElementById('pulseVisibilityToggle'), t.pulseVisibility, desc.pulseVisibility);
+  
+  const languageSetting = document.getElementById('languageSetting');
+  if (languageSetting) {
+    const labelEl = languageSetting.querySelector('.settings-label');
+    const descriptionEl = languageSetting.querySelector('.settings-description');
+    if (labelEl) labelEl.textContent = t.language;
+    if (descriptionEl) descriptionEl.textContent = desc.language;
+  }
+
+  // Update visibility options
+  const visibilityLabels = document.querySelectorAll('.visibility-label');
+  if (visibilityLabels.length >= 3) {
+    visibilityLabels[0].textContent = t.public || 'Публичный';
+    visibilityLabels[1].textContent = t.local || 'Локальный';
+    visibilityLabels[2].textContent = t.private || 'Приватная ссылка';
+  }
+
+  const visibilityDescriptions = document.querySelectorAll('.visibility-description');
+  if (visibilityDescriptions.length >= 3) {
+    visibilityDescriptions[0].textContent = t.publicDesc || 'Видят все в радиусе';
+    visibilityDescriptions[1].textContent = t.localDesc || 'Только активные рядом за 24ч';
+    visibilityDescriptions[2].textContent = t.privateDesc || 'Только по приглашению';
+  }
+  
+  // Update chips
+  const chips = document.querySelectorAll('.chip');
+  if (chips.length > 0) {
+    chips[0].textContent = t.all;
+    chips[1].textContent = t.sport;
+    chips[2].textContent = t.games;
+    chips[3].textContent = t.art;
+    chips[4].textContent = t.social;
+    chips[5].textContent = t.creative;
+    chips[6].textContent = t.chill;
+    chips[7].textContent = t.active;
+    chips[8].textContent = t.dating;
+    chips[9].textContent = t.education;
+    chips[10].textContent = t.animal;
+    chips[11].textContent = t.help;
+  }
+  
+  // Update language selector active state
+  document.querySelectorAll('.language-option').forEach(opt => {
+    opt.classList.toggle('active', opt.dataset.lang === lang);
+  });
+  
+  // Save language preference
+  localStorage.setItem('radius5_language', lang);
+  
+  // Re-render pulses to update time labels
+  renderPulses();
+}
+
+/* -------------------- MAP OPTIMIZATION -------------------- */
+const FALLBACK = [43.238949, 76.889709]; // Алматы
+
+// Create optimized map with better tile loading
+const map = L.map('map', {
+  zoomControl: false,
+  attributionControl: false,
+  preferCanvas: true,
+  zoomSnap: 0.5,
+  zoomDelta: 0.5,
+  wheelPxPerZoomLevel: 60,
+  fadeAnimation: true,
+  markerZoomAnimation: true,
+  transform3DLimit: 8388608,
+  maxZoom: 19,
+  minZoom: 3,
+  maxBounds: [[-90, -180], [90, 180]], // Prevent panning outside world
+  maxBoundsViscosity: 1.0
+}).setView(FALLBACK, 13);
+
+// Dark mode tile layer - используем тёмный стиль через CartoDB Dark Matter (бесплатный)
+const darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  detectRetina: false,
+  updateWhenIdle: true,
+  reuseTiles: true,
+  updateInterval: 150,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: 'abcd',
+  errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+});
+
+// Light mode tile layer - CartoDB Light
+const lightTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  detectRetina: false,
+  updateWhenIdle: true,
+  reuseTiles: true,
+  updateInterval: 150,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: 'abcd',
+  errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+});
+
+// Ensure at least one tile layer is added on init (dark by default)
+darkTileLayer.addTo(map);
+
+let radiusMeters = 2500;
+let center = FALLBACK;
+let locationFixed = false;
+
+const mask = L.circle(center, {
+  radius: radiusMeters,
+  color: 'rgba(0,0,0,0)',
+  weight: 0,
+  fillColor: 'rgba(120,160,255,0.10)',
+  fillOpacity: 0.34
+}).addTo(map);
+
+const ring = L.circle(center, {
+  radius: radiusMeters,
+  color: 'rgba(120,160,255,0.75)',
+  weight: 2,
+  fillOpacity: 0
+}).addTo(map);
+
+const pulsesLayer = L.layerGroup().addTo(map);
+
+const meIcon = L.divIcon({
+  className: '',
+  html: '<div class="meDot"></div>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9]
+});
+let meMarker = L.marker(center, { icon: meIcon, zIndexOffset: 1000 }).addTo(map);
+
+/* Make sure map canvas sizes correctly after initial render */
+// Wait for DOM to be fully ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    map.whenReady(() => {
+      setTimeout(() => {
+        try { 
+          map.invalidateSize(); 
+          // Force a resize event to ensure proper rendering
+          window.dispatchEvent(new Event('resize'));
+        } catch (e) { 
+          console.warn('Map initialization error:', e); 
+        }
+      }, 100);
+    });
+  });
+} else {
+  map.whenReady(() => {
+    setTimeout(() => {
+      try { 
+        map.invalidateSize(); 
+        window.dispatchEvent(new Event('resize'));
+      } catch (e) { 
+        console.warn('Map initialization error:', e); 
+      }
+    }, 100);
+  });
+}
+
+// Also handle window resize events
+window.addEventListener('resize', () => {
+  const isTelegram = window.Telegram && window.Telegram.WebApp;
+  const delay = isTelegram ? 200 : 100;
+  const attempts = isTelegram ? 2 : 1;
+  
+  for (let i = 0; i < attempts; i++) {
+    setTimeout(() => {
+      try { 
+        map.invalidateSize(); 
+        if (locationSelectMap) {
+          locationSelectMap.invalidateSize(true); // reset size
+          // Принудительно обновляем тайлы
+          locationSelectMap.eachLayer((layer) => {
+            if (layer instanceof L.TileLayer) {
+              layer.redraw();
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Resize update failed:', e);
+      }
+    }, delay * (i + 1));
+  }
+});
+
+// Для Telegram WebView также обрабатываем события изменения ориентации
+if (window.Telegram && window.Telegram.WebApp) {
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+      try {
+        map.invalidateSize(true);
+        if (locationSelectMap) {
+          locationSelectMap.invalidateSize(true);
+          locationSelectMap.eachLayer((layer) => {
+            if (layer instanceof L.TileLayer) {
+              layer.redraw();
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Orientation change update failed:', e);
+      }
+    }, 500);
+  });
+}
+
+/* -------------------- LOCATION SELECTION MAP -------------------- */
+let locationSelectMap;
+let selectedLocationMarker;
+let locationSelectMask;
+let locationSelectRing;
+let selectedLocation = null;
+let locationSelectDarkTiles = null;
+let locationSelectLightTiles = null;
+
+function initLocationSelectionMap() {
+  if (locationSelectMap) {
+    locationSelectMap.remove();
+  }
+
+  if (selectedLocationMarker) {
+    try {
+      selectedLocationMarker.remove();
+    } catch (_) {}
+    selectedLocationMarker = null;
+  }
+
+  if (locationSelectMask) {
+    locationSelectMask.remove();
+    locationSelectMask = null;
+  }
+
+  if (locationSelectRing) {
+    locationSelectRing.remove();
+    locationSelectRing = null;
+  }
+
+  // Проверка на Telegram WebView
+  const isTelegram = window.Telegram && window.Telegram.WebApp;
+  
+  locationSelectMap = L.map('locationSelectMap', {
+    zoomControl: false,
+    attributionControl: false,
+    preferCanvas: true,
+    maxBounds: [[-90, -180], [90, 180]],
+    maxBoundsViscosity: 1.0,
+    // Для Telegram WebView используем более надежные настройки
+    zoomAnimation: !isTelegram,
+    fadeAnimation: !isTelegram
+  }).setView(center, 15);
+
+  const initialLocation = state.selectedLocation ? [state.selectedLocation[0], state.selectedLocation[1]] : [center[0], center[1]];
+  const circleCenter = [center[0], center[1]];
+
+  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  
+  // Create separate tile layer instances for location selection map
+  if (!locationSelectDarkTiles) {
+    locationSelectDarkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      detectRetina: false,
+      updateWhenIdle: !isTelegram, // Для Telegram сразу обновляем
+      reuseTiles: true,
+      updateInterval: isTelegram ? 50 : 150, // Чаще обновляем в Telegram
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      // Для Telegram добавляем дополнительные параметры
+      crossOrigin: true,
+      errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+    });
+  }
+  
+  if (!locationSelectLightTiles) {
+    locationSelectLightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      detectRetina: false,
+      updateWhenIdle: !isTelegram, // Для Telegram сразу обновляем
+      reuseTiles: true,
+      updateInterval: isTelegram ? 50 : 150, // Чаще обновляем в Telegram
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      crossOrigin: true,
+      errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+    });
+  }
+  
+  // Use proper dark/light tiles for location selection map
+  const tileLayer = isDark ? locationSelectDarkTiles : locationSelectLightTiles;
+  tileLayer.addTo(locationSelectMap);
+  
+  // Для Telegram WebView принудительно загружаем тайлы сразу
+  if (isTelegram) {
+    setTimeout(() => {
+      tileLayer.redraw();
+    }, 100);
+  }
+
+  locationSelectMask = L.circle(circleCenter, {
+    radius: radiusMeters,
+    color: 'rgba(0,0,0,0)',
+    weight: 0,
+    fillColor: 'rgba(120,160,255,0.10)',
+    fillOpacity: 0.34
+  }).addTo(locationSelectMap);
+
+  locationSelectRing = L.circle(circleCenter, {
+    radius: radiusMeters,
+    color: 'rgba(120,160,255,0.75)',
+    weight: 2,
+    fillOpacity: 0
+  }).addTo(locationSelectMap);
+
+  const initialLatLng = clampToRadius(L.latLng(initialLocation[0], initialLocation[1]));
+
+  selectedLocationMarker = L.marker(initialLatLng, {
+    draggable: true,
+    icon: L.divIcon({
+      className: 'location-marker',
+      html: '📍',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    })
+  }).addTo(locationSelectMap);
+
+  selectedLocation = [initialLatLng.lat, initialLatLng.lng];
+
+  updateLocationSelectionShapes();
+
+  locationSelectMap.on('click', (e) => {
+    const clamped = clampToRadius(e.latlng);
+    selectedLocationMarker.setLatLng(clamped);
+    selectedLocation = [clamped.lat, clamped.lng];
+  });
+
+  selectedLocationMarker.on('drag', (e) => {
+    const marker = e.target;
+    const position = marker.getLatLng();
+    const clamped = clampToRadius(position);
+    if (!clamped.equals(position)) {
+      marker.setLatLng(clamped);
+    }
+    const current = marker.getLatLng();
+    selectedLocation = [current.lat, current.lng];
+  });
+
+  selectedLocationMarker.on('dragend', (e) => {
+    const marker = e.target;
+    const position = marker.getLatLng();
+    const clamped = clampToRadius(position);
+    marker.setLatLng(clamped);
+    selectedLocation = [clamped.lat, clamped.lng];
+  });
+
+  // Для Telegram WebView делаем несколько попыток перерасчета размера
+  const invalidateSizeAttempts = isTelegram ? 5 : 1;
+  const delay = isTelegram ? 200 : 120;
+  
+  for (let i = 0; i < invalidateSizeAttempts; i++) {
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        try { 
+          locationSelectMap.invalidateSize(i === 0); // reset только при первой попытке
+          // Принудительно обновляем тайлы
+          locationSelectMap.eachLayer((layer) => {
+            if (layer instanceof L.TileLayer) {
+              layer.redraw();
+            }
+          });
+          // Небольшой пан для принудительной перерисовки (только при первой попытке)
+          if (i === 0 && isTelegram) {
+            setTimeout(() => {
+              locationSelectMap.panBy([1, 0], { animate: false });
+              setTimeout(() => {
+                locationSelectMap.panBy([-1, 0], { animate: false });
+              }, 100);
+            }, 50);
+          }
+        } catch (e) { 
+          console.warn('Location map invalidateSize attempt', i + 1, 'failed:', e);
+        }
+      });
+    }, delay * (i + 1));
+  }
+}
+
+function updateLocationSelectionShapes() {
+  const circleCenter = [center[0], center[1]];
+  if (locationSelectMask) {
+    locationSelectMask.setLatLng(circleCenter);
+    locationSelectMask.setRadius(radiusMeters);
+  }
+  if (locationSelectRing) {
+    locationSelectRing.setLatLng(circleCenter);
+    locationSelectRing.setRadius(radiusMeters);
+  }
+}
+
+function clampToRadius(latlng) {
+  if (!locationSelectMap) return latlng;
+
+  if (!latlng) {
+    return L.latLng(center[0], center[1]);
+  }
+
+  const circleCenter = L.latLng(center[0], center[1]);
+  const candidate = (typeof latlng.lat === 'number' && typeof latlng.lng === 'number')
+    ? L.latLng(latlng.lat, latlng.lng)
+    : Array.isArray(latlng)
+      ? L.latLng(latlng[0], latlng[1])
+      : circleCenter;
+
+  const distance = locationSelectMap.distance(circleCenter, candidate);
+  if (!isFinite(distance) || distance <= radiusMeters || radiusMeters <= 0) {
+    return candidate;
+  }
+
+  const centerPoint = locationSelectMap.project(circleCenter);
+  const targetPoint = locationSelectMap.project(candidate);
+  const direction = targetPoint.subtract(centerPoint);
+
+  if (!direction.x && !direction.y) {
+    return circleCenter;
+  }
+
+  const scale = radiusMeters / distance;
+  const clampedPoint = centerPoint.add(direction.multiplyBy(scale));
+  return locationSelectMap.unproject(clampedPoint);
+}
+
+/* -------------------- SETTINGS STATE -------------------- */
+const settings = {
+  darkMode: true,
+  showLocation: true,
+  notifications: true,
+  searchRadius: 5,
+  autoRefresh: false,
+  vibration: true,
+  pulseVisibility: false,
+  visibilityMode: 'public',
+  language: 'ru'
+};
+
+/* -------------------- THEME MANAGEMENT -------------------- */
+function applyTheme(isDark) {
+  const root = document.documentElement;
+  if (isDark) {
+    root.setAttribute('data-theme', 'dark');
+    // Switch to dark tiles properly
+    try {
+      if (map.hasLayer(lightTileLayer)) map.removeLayer(lightTileLayer);
+    } catch (e) {}
+    if (!map.hasLayer(darkTileLayer)) darkTileLayer.addTo(map);
+    // update locationSelectMap tiles if present
+    if (locationSelectMap) {
+      locationSelectMap.eachLayer((layer) => {
+        if (layer instanceof L.TileLayer) locationSelectMap.removeLayer(layer);
+      });
+      // Use the separate tile layer instance for location selection map
+      if (locationSelectDarkTiles) {
+        locationSelectDarkTiles.addTo(locationSelectMap);
+      } else {
+        locationSelectDarkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { 
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd'
+        });
+        locationSelectDarkTiles.addTo(locationSelectMap);
+      }
+      setTimeout(() => { try { locationSelectMap.invalidateSize(); } catch(e){} }, 100);
+    }
+  } else {
+    root.setAttribute('data-theme', 'light');
+    // Switch to light tiles properly
+    try {
+      if (map.hasLayer(darkTileLayer)) map.removeLayer(darkTileLayer);
+    } catch (e) {}
+    if (!map.hasLayer(lightTileLayer)) lightTileLayer.addTo(map);
+    if (locationSelectMap) {
+      locationSelectMap.eachLayer((layer) => {
+        if (layer instanceof L.TileLayer) locationSelectMap.removeLayer(layer);
+      });
+      // Use the separate tile layer instance for location selection map
+      if (locationSelectLightTiles) {
+        locationSelectLightTiles.addTo(locationSelectMap);
+      } else {
+        locationSelectLightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { 
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd'
+        });
+        locationSelectLightTiles.addTo(locationSelectMap);
+      }
+      setTimeout(() => { try { locationSelectMap.invalidateSize(); } catch(e){} }, 100);
+    }
+  }
+
+  // After changing tile layers, invalidate size so tiles render correctly in WebViews
+  setTimeout(() => {
+    try { map.invalidateSize(); } catch (e) { console.warn('invalidateSize failed', e); }
+    // also force a small pan to trigger tile redraw on some engines
+    try { map.panBy([0.0001, 0.0001], {animate:false}); } catch(e){}
+  }, 120);
+
+  // Ensure mask/ring radiuses match settings if changed
+  mask.setRadius(radiusMeters);
+  ring.setRadius(radiusMeters);
+}
+
+/* -------------------- UI: chips -------------------- */
+const categories = [
+  { id: 'all', label: 'Все' },
+  { id: 'sport', label: 'Спорт' },
+  { id: 'games', label: 'Игры' },
+  { id: 'art', label: 'Искусство' },
+  { id: 'social', label: 'Социальное' },
+  { id: 'creative', label: 'Креатив' },
+  { id: 'chill', label: 'Отдых' },
+  { id: 'active', label: 'Активность' },
+  { id: 'dating', label: 'Знакомства' },
+  { id: 'education', label: 'Образование' },
+  { id: 'animal', label: 'Животные' },
+  { id: 'help', label: 'Помощь' }
+];
+
+const chips = document.getElementById('chips');
+categories.forEach((c, i) => {
+  const el = document.createElement('button');
+  el.className = 'chip' + (i === 0 ? ' active' : '');
+  el.dataset.cat = c.id;
+  el.textContent = c.label;
+  el.onclick = () => {
+    document.querySelectorAll('.chip').forEach(ch => ch.classList.remove('active'));
+    el.classList.add('active');
+    renderPulses();
+  };
+  chips.appendChild(el);
+});
+
+function activeCat() {
+  const el = document.querySelector('.chip.active');
+  return el ? el.dataset.cat : 'all';
+}
+
+/* -------------------- DATA MODEL -------------------- */
+const state = {
+  pulses: new Map(),
+  me: { lat: center[0], lng: center[1] },
+  customLocation: null,
+  selectedLocation: null,
+  myPulses: new Set(), // Track user's own pulses
+  selectedPulseId: null, // Track currently selected pulse for deletion
+  hasLocation: false
+};
+
+function getEmojiForCategory(cat) {
+  const emojis = {
+    'sport': '🏃',
+    'games': '🎮',
+    'art': '🎨',
+    'social': '👥',
+    'creative': '💡',
+    'chill': '😌',
+    'active': '⚡',
+    'dating': '💕',
+    'education': '📚',
+    'animal': '🐕',
+    'help': '🤝'
+  };
+  return emojis[cat] || '📍';
+}
+
+// НОВАЯ ФУНКЦИЯ: определение цвета и анимации по времени
+function getPulseStyle(createdAt) {
+  const now = new Date();
+  const created = new Date(createdAt);
+  const diffMs = now - created;
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  if (diffMins < 30) {
+    return { colorClass: 'pulse-green', animationClass: 'ring-fast' };
+  } else if (diffMins < 60) {
+    return { colorClass: 'pulse-orange', animationClass: 'ring-medium' };
+  } else {
+    return { colorClass: 'pulse-red', animationClass: 'ring-slow' };
+  }
+}
+
+/* Distance util (meters) */
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6378137;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function withinRadius(lat, lng) {
+  return distanceMeters(center[0], center[1], lat, lng) <= radiusMeters;
+}
+
+/* -------------------- RENDER -------------------- */
+function formatTimeAgo(createdAt) {
+  const now = new Date();
+  const created = new Date(createdAt);
+  const diffMs = now - created;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+
+  const t = translations[currentLanguage];
+  
+  if (diffMins < 1) return t.justNow;
+  if (diffMins < 60) return `${diffMins}${t.minutesAgo}`;
+  if (diffHours < 24) return `${diffHours}${t.hoursAgo}`;
+  return `${Math.floor(diffHours / 24)}${t.daysAgo}`;
+}
+
+function makeMarker(row) {
+  const emoji = getEmojiForCategory(row.category);
+  const pulseStyle = getPulseStyle(row.created_at);
+  
+  const iconHtml = `<div class="pulse ${pulseStyle.colorClass}">
+      <div class="ring ${pulseStyle.animationClass}"></div><span>${emoji}</span>
+    </div>`;
+    
+  const icon = L.divIcon({ className: '', html: iconHtml, iconSize: [52, 52], iconAnchor: [26, 26] });
+  const m = L.marker([row.lat, row.lng], { icon }).addTo(pulsesLayer);
+
+  const timeAgo = formatTimeAgo(row.created_at);
+  const t = translations[currentLanguage];
+  const isMyPulse = state.myPulses.has(row.id);
+  
+  let buttonsHtml = '';
+  if (isMyPulse) {
+    buttonsHtml = `<button class="delete-btn" onclick="deletePulse('${row.id}')">${t.delete}</button>`;
+  } else {
+    buttonsHtml = `<button class="join-btn" onclick="joinPulse('${row.id}')">${t.join}</button>`;
+  }
+
+  m.bindTooltip(
+    `<div style="text-align:center">
+      <div style="font-weight:600;margin-bottom:4px;">${escapeHtml(row.message || '')}</div>
+      ${isMyPulse ? '<div style="color: var(--grad2); font-size: 10px; margin-bottom: 4px;">' + t.yourPulse + '</div>' : ''}
+      <div class="pulse-time">${timeAgo}</div>
+      ${buttonsHtml}
+    </div>`,
+    { className: 'pulse-label', direction: 'bottom', offset: [0, 28], opacity: 1, permanent: false }
+  );
+  
+  m.on('click', () => {
+    m.openTooltip();
+    // Show delete button if this is user's pulse
+    if (isMyPulse) {
+      state.selectedPulseId = row.id;
+      document.getElementById('deletePulseBtn').style.display = 'grid';
+    } else {
+      document.getElementById('deletePulseBtn').style.display = 'none';
+    }
+  });
+  
+  return m;
+}
+
+// УПРОЩЕННАЯ функция удаления пульса
+async function deletePulse(pulseId) {
+  const t = translations[currentLanguage];
+  if (confirm(t.deleteConfirm)) {
+    const { error } = await db
+      .from('pulses')
+      .update({ status: 'deleted' })
+      .eq('id', pulseId);
+
+    if (error) {
+      const message = (error && error.message) || t.errorUnknown;
+      alert(`${t.deleteError}: ${message}`);
+      return;
+    }
+
+    state.pulses.delete(pulseId);
+    state.myPulses.delete(pulseId);
+    if (state.selectedPulseId === pulseId) {
+      state.selectedPulseId = null;
+      document.getElementById('deletePulseBtn').style.display = 'none';
+    }
+    renderPulses();
+    
+    if (settings.vibration && navigator.vibrate) {
+      navigator.vibrate(50);
+    }
+  }
+}
+
+// Функция для удаления выбранного пульса через кнопку
+async function deleteSelectedPulse() {
+  if (!state.selectedPulseId) return;
+  await deletePulse(state.selectedPulseId);
+}
+
+function joinPulse(pulseId) {
+  const pulse = state.pulses.get(pulseId);
+  if (pulse) {
+    const pulseData = pulse.row;
+    const t = translations[currentLanguage];
+    const template = t.joinPreview || `🎉 {join}!\n\n"{message}"\n\nIn the real app this would open a chat with the creator!`;
+    const previewMessage = template
+      .replace('{join}', t.join)
+      .replace('{message}', pulseData.message || '');
+    alert(previewMessage);
+
+    if (pulse.marker) {
+      pulse.marker.closeTooltip();
+    }
+  }
+}
+
+function renderPulses() {
+  pulsesLayer.clearLayers();
+  const cat = activeCat();
+  const now = Date.now();
+  for (const [id, entry] of state.pulses) {
+    const r = entry.row;
+    if (r.status !== 'active') continue;
+    if (r.expires_at && new Date(r.expires_at).getTime() < now) continue;
+    if (cat !== 'all' && r.category !== cat) continue;
+    if (!withinRadius(r.lat, r.lng)) continue;
+    entry.marker = makeMarker(r);
+  }
+}
+
+/* -------------------- GEO - ИСПРАВЛЕННОЕ ОТСЛЕЖИВАНИЕ ЛОКАЦИИ -------------------- */
+let watchId = null;
+let lastReportedPos = null;
+let permissionState = 'unknown';
+
+/* Move center circle and marker only if locationFixed is false and moved more than threshold */
+function moveCircle(lat, lng) {
+  if (locationFixed) return;
+
+  // Only update if moved a reasonable distance to avoid jitter
+  if (lastReportedPos) {
+    const dist = distanceMeters(lastReportedPos.lat, lastReportedPos.lng, lat, lng);
+    if (dist < 25) return; // ignore tiny movements under 25 meters
+  }
+
+  center = [lat, lng];
+  mask.setLatLng(center); 
+  ring.setLatLng(center);
+  meMarker.setLatLng(center);
+  state.me = { lat: lat, lng: lng };
+  state.hasLocation = true;
+  lastReportedPos = { lat, lng };
+  updateLocationSelectionShapes();
+  if (selectedLocationMarker) {
+    const clamped = clampToRadius(selectedLocationMarker.getLatLng());
+    selectedLocationMarker.setLatLng(clamped);
+    selectedLocation = [clamped.lat, clamped.lng];
+  }
+  renderPulses();
+}
+
+function fixLocation(lat, lng) {
+  locationFixed = true;
+  center = [lat, lng];
+  mask.setLatLng(center);
+  ring.setLatLng(center);
+  meMarker.setLatLng(center);
+  state.me = { lat: lat, lng: lng };
+  state.hasLocation = true;
+  map.setView([lat, lng], 14);
+  updateLocationSelectionShapes();
+  if (selectedLocationMarker) {
+    const clamped = clampToRadius(selectedLocationMarker.getLatLng());
+    selectedLocationMarker.setLatLng(clamped);
+    selectedLocation = [clamped.lat, clamped.lng];
+  }
+  renderPulses();
+}
+
+// Improved location tracking:
+// - Use Permissions API to avoid re-requesting permission repeatedly
+// - Keep a single watchPosition (don't call getCurrentPosition repeatedly)
+// - Pause requesting when user denies
+async function startLocationTracking() {
+  if (!('geolocation' in navigator)) {
+    console.log('Geolocation not available');
+    return;
+  }
+
+  // If watch already active, do not re-create it (prevents repeated prompts)
+  if (watchId) {
+    return;
+  }
+
+  // Query permission state if available
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const perm = await navigator.permissions.query({ name: 'geolocation' });
+      permissionState = perm.state;
+      perm.onchange = () => {
+        permissionState = perm.state;
+      };
+    }
+  } catch (e) {
+    console.log('Permissions API unavailable', e);
+  }
+
+  // If permission is 'denied', don't attempt to ask again automatically
+  if (permissionState === 'denied') {
+    console.log('Geolocation permission denied; not requesting.');
+    return;
+  }
+
+  // Request initial position once only if we don't have lastReportedPos
+  // We avoid calling getCurrentPosition repeatedly (it may re-trigger prompts on some platforms)
+  if (!lastReportedPos) {
+    try {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        // Do not call fixLocation here if we want continuous updates and avoid repeated center resets.
+        // Use moveCircle to set initial and keep tracking.
+        moveCircle(latitude, longitude);
+      }, err => {
+        console.log('Initial getCurrentPosition failed', err);
+      }, { enableHighAccuracy: true, timeout: 15000 });
+    } catch (e) {
+      console.log('getCurrentPosition failed', e);
+    }
+  }
+
+  // Start watchPosition once (this will not prompt on many platforms if permission already granted)
+  try {
+    watchId = navigator.geolocation.watchPosition(
+      pos => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        // Only use updates with acceptable accuracy
+        if (typeof accuracy === 'number' && accuracy > 150) {
+          // too inaccurate, skip
+          return;
+        }
+        // Update only if moved sufficiently (this prevents small background jiggling)
+        if (!lastReportedPos) {
+          moveCircle(latitude, longitude);
+        } else {
+          const moved = distanceMeters(lastReportedPos.lat, lastReportedPos.lng, latitude, longitude);
+          // update when user moved > ~30-50 meters or when accuracy improves
+          if (moved > 30 || (accuracy && accuracy < 50)) {
+            moveCircle(latitude, longitude);
+          }
+        }
+      },
+      error => {
+        console.log('Location tracking error:', error);
+        // if permission denied, mark state and clear watch to avoid repeated prompts
+        if (error && error.code === 1) {
+          permissionState = 'denied';
+          if (watchId) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+          }
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000, // accept cached positions up to 5s
+        timeout: 27000
+      }
+    );
+  } catch (e) {
+    console.log('watchPosition creation failed', e);
+  }
+}
+
+// Stop tracking (used when user toggles showLocation off)
+function stopLocationTracking() {
+  if (watchId) {
+    try {
+      navigator.geolocation.clearWatch(watchId);
+    } catch (e) { /* ignore */ }
+    watchId = null;
+  }
+}
+
+/* Start tracking on load if setting allows */
+startLocationTracking();
+
+/* Also respect visibility change: do NOT re-request permission on visibility change.
+   But when returning to visible, keep existing watch active. */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // optional: reduce frequency by stopping watch if you want to reduce battery,
+    // but per user's request we keep real-time updates; we won't call getCurrentPosition again.
+    // stopLocationTracking();
+  } else {
+    // When becoming visible, ensure tracking is running if user wants location and permission wasn't denied
+    if (settings.showLocation && !watchId && permissionState !== 'denied') {
+      startLocationTracking();
+    }
+    // Invalidate map size to force tiles to render if something was clipped while hidden
+    setTimeout(() => {
+      try { map.invalidateSize(); } catch (e) {}
+    }, 120);
+  }
+});
+
+/* -------------------- SUPABASE I/O -------------------- */
+async function loadInitial() {
+  const { data, error } = await db
+    .from('pulses')
+    .select('id, created_at, author_tg_id, category, message, lat, lng, expires_at, status, people_count')
+    .eq('status', 'active')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(300);
+
+  if (error) { console.error(error); return; }
+  
+  // Get current user ID for identifying own pulses
+  let currentUserId = null;
+  try {
+    const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe;
+    if (tg && tg.user) currentUserId = String(tg.user.id);
+  } catch (_) { }
+
+  data.forEach(row => {
+    state.pulses.set(row.id, { row, marker: null });
+    // Mark user's own pulses
+    if (currentUserId && row.author_tg_id === currentUserId) {
+      state.myPulses.add(row.id);
+    }
+  });
+  renderPulses();
+
+  // ensure tiles are requested/rendered after loading initial data
+  setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 120);
+}
+
+function subscribeRealtime() {
+  db.channel('realtime:pulses')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pulses' }, payload => {
+      const row = payload.new;
+      state.pulses.set(row.id, { row, marker: null });
+      
+      // Check if this is user's own pulse
+      let currentUserId = null;
+      try {
+        const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe;
+        if (tg && tg.user) currentUserId = String(tg.user.id);
+      } catch (_) { }
+      
+      if (currentUserId && row.author_tg_id === currentUserId) {
+        state.myPulses.add(row.id);
+      }
+      
+      renderPulses();
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pulses' }, payload => {
+      const row = payload.new;
+      state.pulses.set(row.id, { row, marker: null });
+      renderPulses();
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'pulses' }, payload => {
+      const row = payload.old;
+      state.pulses.delete(row.id);
+      state.myPulses.delete(row.id);
+      if (state.selectedPulseId === row.id) {
+        state.selectedPulseId = null;
+        document.getElementById('deletePulseBtn').style.display = 'none';
+      }
+      renderPulses();
+    })
+    .subscribe();
+}
+
+/* -------------------- CREATE PULSE UI -------------------- */
+const createBtn = document.getElementById('createBtn');
+const createModal = document.getElementById('createModal');
+const addressLocationBtn = document.getElementById('addressLocation');
+const customLocationBtn = document.getElementById('customLocation');
+const addressInputContainer = document.getElementById('addressInputContainer');
+const locationMapContainer = document.getElementById('locationMapContainer');
+const msgTextarea = document.getElementById('msg');
+const locationOverlay = document.getElementById('locationOverlay');
+const categoryField = document.getElementById('categoryField');
+const categoryDisplay = document.getElementById('categoryDisplay');
+const categoryFieldLabel = document.getElementById('categoryFieldLabel');
+const categoryModal = document.getElementById('categoryModal');
+const categoryModalTitle = document.getElementById('categoryModalTitle');
+const categoryOptionsEl = document.getElementById('categoryOptions');
+const closeCategoryModalBtn = document.getElementById('closeCategoryModal');
+const peopleField = document.getElementById('peopleField');
+const peopleDisplay = document.getElementById('peopleDisplay');
+const peopleFieldLabel = document.getElementById('peopleFieldLabel');
+const peopleModal = document.getElementById('peopleModal');
+const peopleModalTitle = document.getElementById('peopleModalTitle');
+const peopleOptionsEl = document.getElementById('peopleOptions');
+const closePeopleModalBtn = document.getElementById('closePeopleModal');
+
+const categoryDefinitions = [
+  { value: 'sport', icon: '🏃', labelKey: 'sport' },
+  { value: 'games', icon: '🎮', labelKey: 'games' },
+  { value: 'art', icon: '🎨', labelKey: 'art' },
+  { value: 'social', icon: '👥', labelKey: 'social' },
+  { value: 'creative', icon: '💡', labelKey: 'creative' },
+  { value: 'chill', icon: '😌', labelKey: 'chill' },
+  { value: 'active', icon: '⚡', labelKey: 'active' },
+  { value: 'dating', icon: '💕', labelKey: 'dating' },
+  { value: 'education', icon: '📚', labelKey: 'education' },
+  { value: 'animal', icon: '🐕', labelKey: 'animal' },
+  { value: 'help', icon: '🤝', labelKey: 'help' }
+];
+
+const peopleValues = [1, 2, 3, 4, 5];
+
+let selectedCategory = 'sport';
+let selectedPeopleCount = 5;
+
+function openOptionModal(modal) {
+  if (modal) {
+    modal.classList.add('open');
+  }
+}
+
+function closeOptionModal(modal) {
+  if (modal) {
+    modal.classList.remove('open');
+  }
+}
+
+function updateMessagePlaceholder() {
+  if (!msgTextarea) return;
+  const hints = categoryHints[currentLanguage] || {};
+  msgTextarea.placeholder = hints[selectedCategory] || translations[currentLanguage].writeMessage;
+}
+
+function updateCategoryDisplay() {
+  if (!categoryDisplay) return;
+  const t = translations[currentLanguage];
+  const def = categoryDefinitions.find(item => item.value === selectedCategory) || categoryDefinitions[0];
+  if (!def) return;
+  categoryDisplay.textContent = `${def.icon} ${t[def.labelKey]}`;
+  if (categoryOptionsEl) {
+    categoryOptionsEl.querySelectorAll('.option-card').forEach(optionEl => {
+      optionEl.classList.toggle('active', optionEl.dataset.value === selectedCategory);
+    });
+  }
+  updateMessagePlaceholder();
+}
+
+function updatePeopleDisplay() {
+  if (!peopleDisplay) return;
+  const icon = selectedPeopleCount === 1 ? '👤' : '👥';
+  peopleDisplay.textContent = `${icon} ${formatPeopleCount(selectedPeopleCount, currentLanguage)}`;
+  if (peopleOptionsEl) {
+    peopleOptionsEl.querySelectorAll('.option-card').forEach(optionEl => {
+      const value = Number(optionEl.dataset.value);
+      optionEl.classList.toggle('active', value === selectedPeopleCount);
+    });
+  }
+}
+
+function updateRadiusLabels() {
+  const slider = document.getElementById('radiusSlider');
+  const t = translations[currentLanguage];
+  if (!slider || !t) return;
+
+  const unit = t.distanceUnit || '';
+  const sliderEnds = document.querySelectorAll('.slider-end');
+  if (sliderEnds.length >= 2) {
+    const minLabel = unit ? `${slider.min} ${unit}` : slider.min;
+    const maxLabel = unit ? `${slider.max} ${unit}` : slider.max;
+    sliderEnds[0].textContent = minLabel;
+    sliderEnds[1].textContent = maxLabel;
+  }
+
+  const radiusValueEl = document.getElementById('radiusValue');
+  if (radiusValueEl) {
+    const displayValue = Number.isFinite(Number(settings.searchRadius)) ? Number(settings.searchRadius) : settings.searchRadius;
+    radiusValueEl.textContent = unit ? `${displayValue} ${unit}` : String(displayValue);
+  }
+}
+
+function renderCategoryOptions() {
+  if (!categoryOptionsEl) return;
+  const t = translations[currentLanguage];
+  categoryOptionsEl.innerHTML = '';
+  categoryDefinitions.forEach(def => {
+    const option = document.createElement('div');
+    option.className = 'option-card' + (def.value === selectedCategory ? ' active' : '');
+    option.dataset.value = def.value;
+    option.innerHTML = `
+      <div class="option-info">
+        <div class="option-icon">${def.icon}</div>
+        <div class="option-text">
+          <div class="option-title">${t[def.labelKey]}</div>
+        </div>
+      </div>
+      <div class="option-check">✓</div>
+    `;
+    categoryOptionsEl.appendChild(option);
+  });
+}
+
+function renderPeopleOptions() {
+  if (!peopleOptionsEl) return;
+  peopleOptionsEl.innerHTML = '';
+  peopleValues.forEach(count => {
+    const option = document.createElement('div');
+    option.className = 'option-card' + (count === selectedPeopleCount ? ' active' : '');
+    option.dataset.value = String(count);
+    const icon = count === 1 ? '👤' : '👥';
+    option.innerHTML = `
+      <div class="option-info">
+        <div class="option-icon">${icon}</div>
+        <div class="option-text">
+          <div class="option-title">${formatPeopleCount(count, currentLanguage)}</div>
+        </div>
+      </div>
+      <div class="option-check">✓</div>
+    `;
+    peopleOptionsEl.appendChild(option);
+  });
+}
+
+if (categoryField) {
+  categoryField.addEventListener('click', () => {
+    if (categoryOptionsEl && !categoryOptionsEl.childElementCount) {
+      renderCategoryOptions();
+    }
+    openOptionModal(categoryModal);
+  });
+}
+
+if (closeCategoryModalBtn) {
+  closeCategoryModalBtn.addEventListener('click', () => closeOptionModal(categoryModal));
+}
+
+if (categoryModal) {
+  categoryModal.addEventListener('click', (event) => {
+    if (event.target === categoryModal) {
+      closeOptionModal(categoryModal);
+    }
+  });
+}
+
+if (categoryOptionsEl) {
+  categoryOptionsEl.addEventListener('click', (event) => {
+    const optionEl = event.target.closest('.option-card');
+    if (!optionEl) return;
+    const value = optionEl.dataset.value;
+    if (!value) return;
+    selectedCategory = value;
+    updateCategoryDisplay();
+    closeOptionModal(categoryModal);
+  });
+}
+
+if (peopleField) {
+  peopleField.addEventListener('click', () => {
+    if (peopleOptionsEl && !peopleOptionsEl.childElementCount) {
+      renderPeopleOptions();
+    }
+    openOptionModal(peopleModal);
+  });
+}
+
+if (closePeopleModalBtn) {
+  closePeopleModalBtn.addEventListener('click', () => closeOptionModal(peopleModal));
+}
+
+if (peopleModal) {
+  peopleModal.addEventListener('click', (event) => {
+    if (event.target === peopleModal) {
+      closeOptionModal(peopleModal);
+    }
+  });
+}
+
+if (peopleOptionsEl) {
+  peopleOptionsEl.addEventListener('click', (event) => {
+    const optionEl = event.target.closest('.option-card');
+    if (!optionEl) return;
+    const value = Number(optionEl.dataset.value);
+    if (!value) return;
+    selectedPeopleCount = value;
+    updatePeopleDisplay();
+    closeOptionModal(peopleModal);
+  });
+}
+
+document.getElementById('cancelCreate').onclick = () => {
+  createModal.classList.remove('open');
+  locationMapContainer.style.display = 'none';
+  addressInputContainer.style.display = 'block';
+  closeOptionModal(categoryModal);
+  closeOptionModal(peopleModal);
+};
+
+createBtn.onclick = () => {
+  if (categoryOptionsEl && !categoryOptionsEl.childElementCount) {
+    renderCategoryOptions();
+  }
+  if (peopleOptionsEl && !peopleOptionsEl.childElementCount) {
+    renderPeopleOptions();
+  }
+  updateCategoryDisplay();
+  updatePeopleDisplay();
+  createModal.classList.add('open');
+};
+
+addressLocationBtn.onclick = () => {
+  addressLocationBtn.classList.add('active');
+  customLocationBtn.classList.remove('active');
+  locationMapContainer.style.display = 'none';
+  addressInputContainer.style.display = 'block';
+  state.selectedLocation = null;
+};
+
+customLocationBtn.onclick = () => {
+  customLocationBtn.classList.add('active');
+  addressLocationBtn.classList.remove('active');
+  locationMapContainer.style.display = 'block';
+  addressInputContainer.style.display = 'none';
+
+  locationOverlay.classList.add('active');
+
+  // Проверка на Telegram WebView - нужна большая задержка для отрисовки
+  const isTelegram = window.Telegram && window.Telegram.WebApp;
+  const initDelay = isTelegram ? 300 : 50;
+
+  // Ждем пока overlay станет видимым перед инициализацией карты
+  // Используем requestAnimationFrame для гарантированного рендеринга в Telegram
+  const initMap = () => {
+    if (!locationSelectMap) {
+      initLocationSelectionMap();
+    } else {
+      const target = state.selectedLocation ? [state.selectedLocation[0], state.selectedLocation[1]] : [center[0], center[1]];
+      const clampedTarget = clampToRadius(target);
+      locationSelectMap.setView(center, 15);
+      if (selectedLocationMarker) {
+        selectedLocationMarker.setLatLng(clampedTarget);
+      }
+      selectedLocation = [clampedTarget.lat, clampedTarget.lng];
+      updateLocationSelectionShapes();
+      
+      // Для Telegram делаем несколько попыток обновления
+      const invalidateAttempts = isTelegram ? 3 : 1;
+      for (let i = 0; i < invalidateAttempts; i++) {
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            try { 
+              locationSelectMap.invalidateSize(true); // reset size
+              // Принудительно обновляем тайлы
+              locationSelectMap.eachLayer((layer) => {
+                if (layer instanceof L.TileLayer) {
+                  layer.redraw();
+                }
+              });
+              // Небольшой пан для принудительной перерисовки тайлов
+              if (i === 0) {
+                locationSelectMap.panBy([0.5, 0], { animate: false });
+                setTimeout(() => {
+                  locationSelectMap.panBy([-0.5, 0], { animate: false });
+                }, 50);
+              }
+            } catch(e) {
+              console.warn('Location map update attempt', i + 1, 'failed:', e);
+            }
+          });
+        }, (i + 1) * 150);
+      }
+    }
+  };
+  
+  if (isTelegram) {
+    // Для Telegram используем несколько уровней задержек
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          requestAnimationFrame(initMap);
+        }, 50);
+      });
+    }, initDelay);
+  } else {
+    setTimeout(initMap, initDelay);
+  }
+};
+
+// Обработчики для оверлея выбора локации
+document.getElementById('cancelLocationSelect').onclick = () => {
+  locationOverlay.classList.remove('active');
+};
+
+// Добавляем обработчик для отслеживания когда overlay становится видимым
+// Это особенно важно для Telegram WebView
+const locationOverlayEl = document.getElementById('locationOverlay');
+if (locationOverlayEl) {
+  // Используем MutationObserver для отслеживания изменения класса active
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        const isActive = locationOverlayEl.classList.contains('active');
+        if (isActive && locationSelectMap) {
+          // Когда overlay становится активным, принудительно обновляем карту
+          const isTelegram = window.Telegram && window.Telegram.WebApp;
+          const delay = isTelegram ? 400 : 200;
+          
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              try {
+                locationSelectMap.invalidateSize(true); // true = reset size
+                // Принудительно перерисовываем все тайлы
+                locationSelectMap.eachLayer((layer) => {
+                  if (layer instanceof L.TileLayer) {
+                    layer.redraw();
+                  }
+                });
+                // Небольшой пан для принудительной перерисовки
+                locationSelectMap.panBy([1, 0], { animate: false });
+                setTimeout(() => {
+                  requestAnimationFrame(() => {
+                    locationSelectMap.panBy([-1, 0], { animate: false });
+                  });
+                }, 100);
+              } catch (e) {
+                console.warn('Location map refresh failed:', e);
+              }
+            });
+          }, delay);
+        }
+      }
+    });
+  });
+  
+  observer.observe(locationOverlayEl, {
+    attributes: true,
+    attributeFilter: ['class']
+  });
+}
+
+document.getElementById('confirmLocationSelect').onclick = () => {
+  if (selectedLocation) {
+    state.selectedLocation = selectedLocation;
+    locationOverlay.classList.remove('active');
+    document.getElementById('addressInput').value = '';
+  }
+};
+
+document.getElementById('saveCreate').onclick = async () => {
+  const cat = selectedCategory;
+  const msg = document.getElementById('msg').value.trim().slice(0, 180);
+  const peopleCount = Number(selectedPeopleCount) || 5;
+  const addressInput = document.getElementById('addressInput').value.trim();
+  const t = translations[currentLanguage];
+
+  let pulseLat, pulseLng;
+
+  if (state.selectedLocation) {
+    [pulseLat, pulseLng] = state.selectedLocation;
+  } else if (addressInput && t && addressInput !== t.enterAddress) {
+    pulseLat = state.me.lat ?? center[0];
+    pulseLng = state.me.lng ?? center[1];
+  } else {
+    pulseLat = state.me.lat ?? center[0];
+    pulseLng = state.me.lng ?? center[1];
+  }
+
+  const expires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+  let tgId = null;
+  try {
+    const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe;
+    if (tg && tg.user) tgId = String(tg.user.id);
+  } catch (_) { }
+
+  const row = {
+    category: cat,
+    message: msg || 'ping',
+    lat: pulseLat,
+    lng: pulseLng,
+    expires_at: expires,
+    status: 'active',
+    author_tg_id: tgId,
+    people_count: peopleCount
+  };
+
+  const { data, error } = await db.from('pulses').insert(row).select().single();
+  if (error) {
+    const message = (error && error.message) || (t ? t.errorUnknown : 'unknown');
+    const prefix = t ? t.createError : 'Error creating pulse';
+    alert(`${prefix}: ${message}`);
+    return;
+  }
+
+  state.pulses.set(data.id, { row: data, marker: null });
+  
+  // Mark as user's own pulse
+  if (tgId) {
+    state.myPulses.add(data.id);
+  }
+  
+  renderPulses();
+  createModal.classList.remove('open');
+  locationMapContainer.style.display = 'none';
+  addressInputContainer.style.display = 'block';
+  closeOptionModal(categoryModal);
+  closeOptionModal(peopleModal);
+  document.getElementById('msg').value = '';
+  document.getElementById('addressInput').value = '';
+};
+
+/* -------------------- SETTINGS FUNCTIONALITY -------------------- */
+const settingsModal = document.getElementById('settingsModal');
+const settingsBtn = document.getElementById('settingsBtn');
+
+// Инициализация настроек
+function initSettings() {
+  const savedSettings = localStorage.getItem('radius5_settings');
+  if (savedSettings) {
+    Object.assign(settings, JSON.parse(savedSettings));
+  }
+
+  const savedLanguage = localStorage.getItem('radius5_language');
+  if (savedLanguage) {
+    currentLanguage = savedLanguage;
+  } else if (settings.language) {
+    currentLanguage = settings.language;
+  }
+
+  settings.language = currentLanguage;
+
+  applySettings();
+  updateSettingsUI();
+  applyLanguage(currentLanguage);
+}
+
+function applySettings() {
+  applyTheme(settings.darkMode);
+
+  radiusMeters = settings.searchRadius * 1000;
+  mask.setRadius(radiusMeters);
+  ring.setRadius(radiusMeters);
+  updateLocationSelectionShapes();
+  if (selectedLocationMarker) {
+    const clamped = clampToRadius(selectedLocationMarker.getLatLng());
+    selectedLocationMarker.setLatLng(clamped);
+    selectedLocation = [clamped.lat, clamped.lng];
+  }
+
+  if (settings.showLocation) {
+    meMarker.addTo(map);
+    // Перезапускаем отслеживание локации если включено
+    startLocationTracking();
+  } else {
+    meMarker.remove();
+    // Останавливаем отслеживание если выключено
+    stopLocationTracking();
+  }
+
+  renderPulses();
+}
+
+function updateSettingsUI() {
+  document.getElementById('darkModeToggle').classList.toggle('active', settings.darkMode);
+  document.getElementById('showLocationToggle').classList.toggle('active', settings.showLocation);
+  document.getElementById('notificationsToggle').classList.toggle('active', settings.notifications);
+  document.getElementById('autoRefreshToggle').classList.toggle('active', settings.autoRefresh);
+  document.getElementById('vibrationToggle').classList.toggle('active', settings.vibration);
+  document.getElementById('pulseVisibilityToggle').classList.toggle('active', settings.pulseVisibility);
+  
+  const radiusSliderEl = document.getElementById('radiusSlider');
+  if (radiusSliderEl) {
+    radiusSliderEl.value = settings.searchRadius;
+  }
+  updateRadiusLabels();
+  // keep lastSliderValue in sync when UI updates
+  lastSliderValue = settings.searchRadius;
+  
+  // Update visibility options
+  document.getElementById('visibilityOptions').classList.toggle('active', settings.pulseVisibility);
+  document.querySelectorAll('[data-visibility]').forEach(toggle => {
+    toggle.classList.toggle('active', toggle.dataset.visibility === settings.visibilityMode);
+  });
+}
+
+// Обработчики для тогглов
+document.querySelectorAll('.toggle').forEach(toggle => {
+  toggle.addEventListener('click', function () {
+    this.classList.toggle('active');
+  });
+});
+
+// Обработчик для слайдера радиуса
+let lastSliderValue = 5;
+document.getElementById('radiusSlider').addEventListener('input', function () {
+  settings.searchRadius = parseFloat(this.value);
+  updateRadiusLabels();
+  // Haptic feedback only when selecting exactly 5 km
+  if (settings.vibration && navigator.vibrate) {
+    const isNowFive = Math.round(settings.searchRadius) === 5;
+    const wasFive = Math.round(lastSliderValue) === 5;
+    if (isNowFive && !wasFive) {
+      navigator.vibrate(30);
+    }
+  }
+  lastSliderValue = settings.searchRadius;
+});
+
+// Pulse visibility toggle
+document.getElementById('pulseVisibilityToggle').addEventListener('click', function() {
+  settings.pulseVisibility = this.classList.contains('active');
+  document.getElementById('visibilityOptions').classList.toggle('active', settings.pulseVisibility);
+});
+
+// Visibility mode toggles
+document.querySelectorAll('[data-visibility]').forEach(toggle => {
+  toggle.addEventListener('click', function() {
+    document.querySelectorAll('[data-visibility]').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+    settings.visibilityMode = this.dataset.visibility;
+  });
+});
+
+// Language selection
+document.querySelectorAll('.language-option').forEach(option => {
+  option.addEventListener('click', function() {
+    const lang = this.dataset.lang;
+    if (!lang) return;
+    document.querySelectorAll('.language-option').forEach(opt => opt.classList.remove('active'));
+    this.classList.add('active');
+    applyLanguage(lang);
+    settings.language = lang;
+  });
+});
+
+// Открытие/закрытие настроек
+settingsBtn.onclick = () => {
+  settingsModal.classList.add('open');
+  updateSettingsUI();
+};
+
+document.getElementById('cancelSettings').onclick = () => {
+  settingsModal.classList.remove('open');
+  initSettings();
+};
+
+document.getElementById('saveSettings').onclick = () => {
+  settings.darkMode = document.getElementById('darkModeToggle').classList.contains('active');
+  settings.showLocation = document.getElementById('showLocationToggle').classList.contains('active');
+  settings.notifications = document.getElementById('notificationsToggle').classList.contains('active');
+  settings.autoRefresh = document.getElementById('autoRefreshToggle').classList.contains('active');
+  settings.vibration = document.getElementById('vibrationToggle').classList.contains('active');
+  settings.pulseVisibility = document.getElementById('pulseVisibilityToggle').classList.contains('active');
+
+  localStorage.setItem('radius5_settings', JSON.stringify(settings));
+  localStorage.setItem('radius5_language', currentLanguage);
+
+  applySettings();
+
+  settingsModal.classList.remove('open');
+
+  if (settings.vibration && navigator.vibrate) {
+    navigator.vibrate(50);
+  }
+  
+  const t = translations[currentLanguage];
+  alert(t.save + '!');
+};
+
+/* -------------------- HELPERS -------------------- */
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+/* -------------------- INIT -------------------- */
+loadInitial();
+subscribeRealtime();
+initSettings();
+
+// Add click handler for delete button
+document.getElementById('deletePulseBtn').addEventListener('click', deleteSelectedPulse);
+
+// Add click handler for geolocation button
+document.getElementById('geolocationBtn').addEventListener('click', () => {
+  if (settings.showLocation && !watchId) {
+    startLocationTracking();
+  }
+
+  const hasValidLocation = state.hasLocation && state.me && Number.isFinite(state.me.lat) && Number.isFinite(state.me.lng);
+
+  if (hasValidLocation) {
+    map.setView([state.me.lat, state.me.lng], 15, {
+      animate: true,
+      duration: 0.5
+    });
+
+    if (settings.vibration && navigator.vibrate) {
+      navigator.vibrate(30);
+    }
+  } else if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const { latitude, longitude } = pos.coords;
+      map.setView([latitude, longitude], 15, {
+        animate: true,
+        duration: 0.5
+      });
+      moveCircle(latitude, longitude);
+
+      if (settings.vibration && navigator.vibrate) {
+        navigator.vibrate(30);
+      }
+    }, error => {
+      console.log('Geolocation error:', error);
+      const t = translations[currentLanguage];
+      const message = (error && error.message) || t.errorGeneric || t.errorUnknown;
+      alert(`${t.returnToLocation} - ${message}`);
+    }, { enableHighAccuracy: true, timeout: 15000 });
+  } else {
+    const t = translations[currentLanguage];
+    alert(`${t.returnToLocation} - ${t.errorUnknown}`);
+  }
+});
+
+// Hide delete button when clicking on map (not on markers)
+map.on('click', e => {
+  // Check if click was on a marker (if so, don't hide delete button)
+  const point = map.latLngToContainerPoint(e.latlng);
+  const isMarkerClick = Object.values(pulsesLayer._layers).some(layer => {
+    if (layer instanceof L.Marker) {
+      const markerPoint = map.latLngToContainerPoint(layer.getLatLng());
+      const distance = Math.sqrt(
+        Math.pow(point.x - markerPoint.x, 2) + 
+        Math.pow(point.y - markerPoint.y, 2)
+      );
+      return distance < 30; // If click within 30px of marker center
+    }
+    return false;
+  });
+  
+  if (!isMarkerClick) {
+    document.getElementById('deletePulseBtn').style.display = 'none';
+    state.selectedPulseId = null;
+  }
+});
+
+setInterval(() => {
+  if (settings.autoRefresh) {
+    renderPulses();
+  }
+}, 60000);
+
+// ==================== SPLASH SCREEN LOGIC ====================
+(function initSplashScreen() {
+  const splashScreen = document.getElementById('splash-screen');
+  
+  if (!splashScreen) return;
+  
+  let hasRemoved = false;
+  const startTime = Date.now();
+  const MIN_DISPLAY_TIME = 2500; // Минимум 2.5 секунды показа
+  
+  function removeSplash() {
+    if (hasRemoved) return;
+    hasRemoved = true;
+    
+    // Add fade-out class
+    splashScreen.classList.add('fade-out');
+    
+    // Remove from DOM after animation completes
+    setTimeout(() => {
+      if (splashScreen && splashScreen.parentNode) {
+        splashScreen.parentNode.removeChild(splashScreen);
+      }
+    }, 800); // Match CSS animation duration
+  }
+  
+  function attemptRemove() {
+    const elapsed = Date.now() - startTime;
+    const remaining = MIN_DISPLAY_TIME - elapsed;
+    
+    if (remaining > 0) {
+      // Если еще не прошло минимальное время, ждем
+      setTimeout(removeSplash, remaining);
+    } else {
+      // Минимальное время прошло, можно удалять
+      removeSplash();
+    }
+  }
+  
+  // Удаляем после загрузки, но не раньше минимального времени
+  window.addEventListener('load', attemptRemove);
+  
+  // Fallback: удаляем через 5 секунд в любом случае
+  setTimeout(removeSplash, 5000);
+})();
+// ==================== END SPLASH SCREEN LOGIC ====================
+</script>
+</body>
+</html>
