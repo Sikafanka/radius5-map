@@ -1,0 +1,5 @@
+[build]
+  publish = "."
+  command = "node scripts/generate-config.js"
+
+
