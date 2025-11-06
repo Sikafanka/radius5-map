@@ -1,7 +1,0 @@
-# Do not commit generated or secret config
-config.js
-
-# Node artifacts if any
-node_modules/
-scripts/node_modules/
-
