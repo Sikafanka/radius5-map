@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "name": "radius5-miniapp",
+  "builds": [
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "ALLOWALL"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data:; frame-ancestors https://telegram.org https://web.telegram.org; connect-src 'self' https://gubjmpukjzdlmnzdyluy.supabase.co https://unpkg.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; style-src 'self' 'unsafe-inline' https://unpkg.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; font-src 'self' data: https:;"
+        }
+      ]
+    }
+  ],
+  "env": {
+    "SUPABASE_URL": "https://gubjmpukjzdlmnzdyluy.supabase.co",
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1YmptcHVranpkbG1uemR5bHV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxNTQzMTIsImV4cCI6MjA3NzczMDMxMn0.jWVJGaTi7t24KLn3agw5HBSzFfjb0lU6GnFXREH9PfA"
+  }
+}
